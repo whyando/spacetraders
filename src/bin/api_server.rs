@@ -113,7 +113,7 @@ async fn get_events_handler(
     scylla_client: ScyllaClient,
 ) -> Result<impl Reply, Rejection> {
     match scylla_client
-        .get_events(&log_id, Some(query.seq_num), Some(200))
+        .get_events(&log_id, Some(query.seq_num), 200)
         .await
     {
         Ok(events) => Ok(warp::reply::with_status(
@@ -136,7 +136,7 @@ async fn get_entity_events_handler(
     scylla_client: ScyllaClient,
 ) -> Result<impl Reply, Rejection> {
     match scylla_client
-        .get_events_by_entity(&log_id, &entity_id, Some(query.seq_num), Some(200))
+        .get_events_by_entity(&log_id, &entity_id, Some(query.seq_num), 200)
         .await
     {
         Ok(events) => Ok(warp::reply::with_status(
@@ -177,7 +177,10 @@ async fn get_snapshot_handler(
     query: SnapshotQuery,
     scylla_client: ScyllaClient,
 ) -> Result<impl Reply, Rejection> {
-    match scylla_client.get_snapshot_at_or_before(&log_id, &entity_id, query.seq_num).await {
+    match scylla_client
+        .get_snapshot_at_or_before(&log_id, &entity_id, query.seq_num)
+        .await
+    {
         Some(snapshot) => Ok(warp::reply::with_status(
             warp::reply::json(&snapshot),
             warp::http::StatusCode::OK,

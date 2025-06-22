@@ -1,5 +1,7 @@
 use crate::agent_controller::Event;
-use crate::api_client::api_models::{NavigateResponse, OrbitResponse, RefuelResponse, TradeResponse};
+use crate::api_client::api_models::{
+    NavigateResponse, OrbitResponse, RefuelResponse, TradeResponse,
+};
 use crate::models::{ShipCargoItem, ShipCooldown, Survey};
 use crate::ship_controller::ShipNavStatus::*;
 use crate::{

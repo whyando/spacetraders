@@ -149,7 +149,11 @@ impl Worker {
             Endpoint::Other => {}
         }
 
-        if ship_updates.is_empty() && ship_nav_updates.is_empty() && ship_fuel_updates.is_empty() && ship_cargo_updates.is_empty() {
+        if ship_updates.is_empty()
+            && ship_nav_updates.is_empty()
+            && ship_fuel_updates.is_empty()
+            && ship_cargo_updates.is_empty()
+        {
             return;
         }
 
@@ -181,7 +185,12 @@ impl Worker {
         ship_fuel_update: Option<&ShipFuel>,
         ship_cargo_update: Option<&st::models::ShipCargo>,
     ) {
-        assert!(ship_update.is_some() || ship_nav_update.is_some() || ship_fuel_update.is_some() || ship_cargo_update.is_some());
+        assert!(
+            ship_update.is_some()
+                || ship_nav_update.is_some()
+                || ship_fuel_update.is_some()
+                || ship_cargo_update.is_some()
+        );
         let current_state = self.scylla.get_entity(log_id, ship_symbol).await;
         let ship_entity_prev: Option<ShipEntity> = current_state
             .as_ref()
@@ -190,11 +199,19 @@ impl Worker {
         // Get the latest ship entity
         let ship_entity: ShipEntity = match ship_update {
             Some(ship) => {
-                assert!(ship_nav_update.is_none() && ship_fuel_update.is_none() && ship_cargo_update.is_none());
+                assert!(
+                    ship_nav_update.is_none()
+                        && ship_fuel_update.is_none()
+                        && ship_cargo_update.is_none()
+                );
                 to_ship_entity(ship)
             }
             None => {
-                assert!(ship_nav_update.is_some() || ship_fuel_update.is_some() || ship_cargo_update.is_some());
+                assert!(
+                    ship_nav_update.is_some()
+                        || ship_fuel_update.is_some()
+                        || ship_cargo_update.is_some()
+                );
                 let mut ship_entity = match &ship_entity_prev {
                     Some(ship_entity_prev) => ship_entity_prev.clone(),
                     None => {
@@ -359,7 +376,8 @@ fn endpoint(method: &str, path: &str) -> Endpoint {
         static ref SHIP_DOCK_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/dock$").unwrap();
         static ref SHIP_ORBIT_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/orbit$").unwrap();
         static ref SHIP_REFUEL_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/refuel$").unwrap();
-        static ref SHIP_PURCHASE_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/purchase$").unwrap();
+        static ref SHIP_PURCHASE_REGEX: Regex =
+            Regex::new(r"^/my/ships/([^/]+)/purchase$").unwrap();
         static ref SHIP_SELL_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/sell$").unwrap();
     }
 

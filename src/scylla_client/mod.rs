@@ -127,7 +127,7 @@ impl ScyllaClient {
         &self,
         event_log_id: &str,
         from_seq_num: Option<i64>,
-        limit: Option<i32>,
+        limit: i32,
     ) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
         let mut query_str = "SELECT * FROM spacetraders.events WHERE event_log_id = ?".to_string();
 
@@ -135,35 +135,19 @@ impl ScyllaClient {
             query_str.push_str(" AND seq_num >= ?");
         }
 
-        query_str.push_str(" ORDER BY seq_num ASC");
-
-        if let Some(_limit_val) = limit {
-            query_str.push_str(" LIMIT ?");
-        }
+        query_str.push_str(" ORDER BY seq_num ASC LIMIT ?");
 
         let query = Statement::new(query_str);
 
         // Use different query patterns based on parameters
         let result = if let Some(from_seq) = from_seq_num {
-            if let Some(limit_val) = limit {
-                self.session
-                    .query_unpaged(query, (event_log_id.to_string(), from_seq, limit_val))
-                    .await?
-            } else {
-                self.session
-                    .query_unpaged(query, (event_log_id.to_string(), from_seq))
-                    .await?
-            }
+            self.session
+                .query_unpaged(query, (event_log_id.to_string(), from_seq, limit))
+                .await?
         } else {
-            if let Some(limit_val) = limit {
-                self.session
-                    .query_unpaged(query, (event_log_id.to_string(), limit_val))
-                    .await?
-            } else {
-                self.session
-                    .query_unpaged(query, (event_log_id.to_string(),))
-                    .await?
-            }
+            self.session
+                .query_unpaged(query, (event_log_id.to_string(), limit))
+                .await?
         };
 
         let rows = result.into_rows_result()?;
@@ -176,57 +160,38 @@ impl ScyllaClient {
         event_log_id: &str,
         entity_id: &str,
         from_sequence: Option<i64>,
-        limit: Option<i32>,
+        limit: i32,
     ) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
         let mut query_str = "SELECT * FROM spacetraders.events_by_entity_id WHERE event_log_id = ? AND entity_id = ?".to_string();
 
         if let Some(_from_seq) = from_sequence {
-            query_str.push_str(" AND seq_num > ?");
+            query_str.push_str(" AND seq_num >= ?");
         }
 
-        query_str.push_str(" ORDER BY entity_id ASC, seq_num ASC");
-
-        if let Some(_limit_val) = limit {
-            query_str.push_str(" LIMIT ?");
-        }
+        query_str.push_str(" ORDER BY entity_id ASC, seq_num ASC LIMIT ?");
 
         let query = Statement::new(query_str);
 
         // Use different query patterns based on parameters
         let result = if let Some(from_seq) = from_sequence {
-            if let Some(limit_val) = limit {
-                self.session
-                    .query_unpaged(
-                        query,
-                        (
-                            event_log_id.to_string(),
-                            entity_id.to_string(),
-                            from_seq,
-                            limit_val,
-                        ),
-                    )
-                    .await?
-            } else {
-                self.session
-                    .query_unpaged(
-                        query,
-                        (event_log_id.to_string(), entity_id.to_string(), from_seq),
-                    )
-                    .await?
-            }
+            self.session
+                .query_unpaged(
+                    query,
+                    (
+                        event_log_id.to_string(),
+                        entity_id.to_string(),
+                        from_seq,
+                        limit,
+                    ),
+                )
+                .await?
         } else {
-            if let Some(limit_val) = limit {
-                self.session
-                    .query_unpaged(
-                        query,
-                        (event_log_id.to_string(), entity_id.to_string(), limit_val),
-                    )
-                    .await?
-            } else {
-                self.session
-                    .query_unpaged(query, (event_log_id.to_string(), entity_id.to_string()))
-                    .await?
-            }
+            self.session
+                .query_unpaged(
+                    query,
+                    (event_log_id.to_string(), entity_id.to_string(), limit),
+                )
+                .await?
         };
 
         let rows = result.into_rows_result()?;
@@ -262,37 +227,6 @@ impl ScyllaClient {
             .map(|row| row.unwrap())
     }
 
-    pub async fn get_snapshots(
-        &self,
-        event_log_id: &str,
-        entity_id: &str,
-        limit: Option<i32>,
-    ) -> Result<Vec<Snapshot>, Box<dyn std::error::Error>> {
-        let mut query_str = "SELECT * FROM spacetraders.snapshots WHERE event_log_id = ? AND entity_id = ? ORDER BY seq_num DESC".to_string();
-
-        if let Some(_limit_val) = limit {
-            query_str.push_str(" LIMIT ?");
-        }
-
-        let query = Statement::new(query_str);
-
-        let result = if let Some(limit_val) = limit {
-            self.session
-                .query_unpaged(
-                    query,
-                    (event_log_id.to_string(), entity_id.to_string(), limit_val),
-                )
-                .await?
-        } else {
-            self.session
-                .query_unpaged(query, (event_log_id.to_string(), entity_id.to_string()))
-                .await?
-        };
-
-        let rows = result.into_rows_result()?;
-        Ok(rows.rows::<Snapshot>()?.map(|row| row.unwrap()).collect())
-    }
-
     /// Get the most recent snapshot with seq_num <= target_seq_num for a specific entity
     pub async fn get_snapshot_at_or_before(
         &self,
@@ -305,7 +239,14 @@ impl ScyllaClient {
         );
         let result = self
             .session
-            .query_unpaged(query, &(event_log_id.to_string(), entity_id.to_string(), target_seq_num))
+            .query_unpaged(
+                query,
+                &(
+                    event_log_id.to_string(),
+                    entity_id.to_string(),
+                    target_seq_num,
+                ),
+            )
             .await
             .unwrap();
 
