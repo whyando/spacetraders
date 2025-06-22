@@ -5,9 +5,7 @@ metadata:
   labels:
     {{- include "st-event-processor.labels" . | nindent 4 }}
 spec:
-  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
-  {{- end }}
   selector:
     matchLabels:
       {{- include "st-event-processor.selectorLabels" . | nindent 6 }}
@@ -42,8 +40,13 @@ spec:
           command: ["/app/event_processor"]
           args: []
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: RUST_LOG
+              value: info,st=debug
+            - name: RUST_BACKTRACE
+              value: "0"
+            {{- toYaml .Values.env | nindent 12 }}
           {{- with .Values.volumeMounts }}
           volumeMounts:
             {{- toYaml . | nindent 12 }}

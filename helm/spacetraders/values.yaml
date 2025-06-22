@@ -19,7 +19,6 @@ securityContext: {}
 resources: {}
 
 volumes: []
-
 volumeMounts: []
 
 nodeSelector: {}
