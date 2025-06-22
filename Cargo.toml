@@ -1,7 +1,7 @@
 [package]
 name = "st"
 version = "0.4.0"
-edition = "2021"
+edition = "2024"
 default-run = "main"
 publish = false
 license = "MIT"
@@ -12,6 +12,7 @@ license = "MIT"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3.30"
 reqwest = { version = "0.12", features = ["json", "native-tls"] }
+warp = "0.3"
 
 # postgres
 diesel = { version = "2", features = ["postgres", "chrono", "serde_json", "uuid"] }

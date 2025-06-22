@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use scylla::{
     client::{session::Session, session_builder::SessionBuilder},
     statement::Statement,
@@ -6,7 +7,7 @@ use scylla::{
 };
 use std::sync::Arc;
 
-#[derive(Debug, DeserializeRow, SerializeRow)]
+#[derive(Debug, Clone, DeserializeRow, SerializeRow, Serialize, Deserialize)]
 pub struct CurrentState {
     pub event_log_id: String,
     pub entity_id: String,
@@ -18,7 +19,7 @@ pub struct CurrentState {
     pub last_snapshot_entity_seq_num: i64,
 }
 
-#[derive(Debug, DeserializeRow, SerializeRow)]
+#[derive(Debug, Clone, DeserializeRow, SerializeRow, Serialize, Deserialize)]
 pub struct Event {
     pub event_log_id: String,
     pub seq_num: i64,             // Primary ordering mechanism within event log
@@ -46,6 +47,7 @@ pub struct EventLog {
     pub last_updated: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone)]
 pub struct ScyllaClient {
     session: Arc<Session>,
 }
