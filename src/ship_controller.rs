@@ -9,7 +9,7 @@ use chrono::{DateTime, Duration, Utc};
 use log::*;
 use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::cmp::min;
 use std::sync::{Arc, Mutex};
 

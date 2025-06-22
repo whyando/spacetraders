@@ -1,4 +1,4 @@
-use prettytable::{format, row, Table};
+use prettytable::{Table, format, row};
 use st::api_client::ApiClient;
 use st::database::DbClient;
 use st::universe::Universe;

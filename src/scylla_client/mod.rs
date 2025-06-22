@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use scylla::{
+    DeserializeRow, SerializeRow,
     client::{session::Session, session_builder::SessionBuilder},
     statement::Statement,
-    DeserializeRow, SerializeRow,
 };
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, DeserializeRow, SerializeRow, Serialize, Deserialize)]
@@ -66,7 +66,9 @@ impl ScyllaClient {
     }
 
     pub async fn get_event_log(&self, log_id: &str) -> Option<EventLog> {
-        let query = Statement::new("SELECT event_log_id, last_seq_num, last_updated FROM spacetraders.event_logs WHERE event_log_id = ? LIMIT 1");
+        let query = Statement::new(
+            "SELECT event_log_id, last_seq_num, last_updated FROM spacetraders.event_logs WHERE event_log_id = ? LIMIT 1",
+        );
         let result = self.session.query_unpaged(query, &(log_id,)).await.unwrap();
         let result = result.into_rows_result().unwrap();
         result
@@ -85,7 +87,9 @@ impl ScyllaClient {
 
     // Current State Operations
     pub async fn get_entity(&self, event_log_id: &str, entity_id: &str) -> Option<CurrentState> {
-        let query = Statement::new("SELECT * FROM spacetraders.current_state WHERE event_log_id = ? AND entity_id = ? LIMIT 1");
+        let query = Statement::new(
+            "SELECT * FROM spacetraders.current_state WHERE event_log_id = ? AND entity_id = ? LIMIT 1",
+        );
         let result = self
             .session
             .query_unpaged(query, &(event_log_id.to_string(), entity_id.to_string()))
@@ -100,7 +104,9 @@ impl ScyllaClient {
     }
 
     pub async fn upsert_entity(&self, current_state: &CurrentState) {
-        let query = Statement::new("INSERT INTO spacetraders.current_state (event_log_id, entity_id, entity_type, state_data, last_updated, seq_num, entity_seq_num, last_snapshot_entity_seq_num) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        let query = Statement::new(
+            "INSERT INTO spacetraders.current_state (event_log_id, entity_id, entity_type, state_data, last_updated, seq_num, entity_seq_num, last_snapshot_entity_seq_num) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        );
         self.session
             .query_unpaged(query, current_state)
             .await

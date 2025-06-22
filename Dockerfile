@@ -1,25 +1,16 @@
-# Layer 1: Planner
-FROM lukemathwalker/cargo-chef:latest-rust-1.86-alpine AS planner
-WORKDIR /usr/src/app
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-# Layer 2: Builder
-FROM lukemathwalker/cargo-chef:latest-rust-1.86-alpine AS builder
+# Layer 1: Builder
+FROM rust:1.86-alpine AS builder
 WORKDIR /usr/src/app
 
 # Install build dependencies
-RUN apk add --no-cache pkgconfig openssl-dev musl-dev openssl-libs-static postgresql-dev
-
-# Copy the recipe and build dependencies
-COPY --from=planner /usr/src/app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json --target x86_64-unknown-linux-musl
+RUN apk add --no-cache pkgconfig openssl-dev musl-dev openssl-libs-static postgresql-dev bash g++ make
 
 # Copy the source code and build the application
 COPY . .
-RUN cargo build --release --target x86_64-unknown-linux-musl
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --release --target x86_64-unknown-linux-musl
 
-# Layer 3: Runtime
+# Layer 2: Runtime
 FROM alpine:3.19 AS runtime
 WORKDIR /app
 

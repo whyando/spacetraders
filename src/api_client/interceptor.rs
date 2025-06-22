@@ -5,6 +5,7 @@ pub trait ApiInterceptor: Send + Sync {
     /// Called after receiving an API response
     fn after_response(
         &self,
+        slice_id: &str,
         req_id: u64,
         method: &Method,
         path: &str,

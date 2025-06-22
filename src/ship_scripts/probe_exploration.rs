@@ -1,8 +1,8 @@
 use crate::{models::WaypointSymbol, ship_controller::ShipController};
+use ExplorerState::*;
 use log::*;
 use pathfinding::directed::dijkstra::dijkstra;
 use serde::{Deserialize, Serialize};
-use ExplorerState::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 enum ExplorerState {

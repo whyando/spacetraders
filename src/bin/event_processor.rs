@@ -172,7 +172,10 @@ impl Worker {
                 let mut ship_entity = match &ship_entity_prev {
                     Some(ship_entity_prev) => ship_entity_prev.clone(),
                     None => {
-                        warn!("No previous ship entity found in scylla for {}. Skipping partial ship update.", ship_symbol);
+                        warn!(
+                            "No previous ship entity found in scylla for {}. Skipping partial ship update.",
+                            ship_symbol
+                        );
                         return;
                     }
                 };

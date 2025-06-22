@@ -2,10 +2,10 @@ use crate::{
     database::DbClient, models::WaypointSymbol, ship_controller::ShipController,
     universe::WaypointFilter,
 };
+use SiphonShuttleState::*;
 use lazy_static::lazy_static;
 use log::*;
 use serde::{Deserialize, Serialize};
-use SiphonShuttleState::*;
 
 lazy_static! {
     // The goods that can be siphoned from a gas giant

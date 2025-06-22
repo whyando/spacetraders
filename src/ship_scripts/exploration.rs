@@ -5,11 +5,11 @@ use crate::{
     ship_controller::ShipController,
     universe::pathfinding::EdgeType,
 };
+use ExplorerState::*;
 use chrono::Duration;
 use log::*;
 use pathfinding::directed::dijkstra::dijkstra;
 use serde::{Deserialize, Serialize};
-use ExplorerState::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 enum ExplorerState {

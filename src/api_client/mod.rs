@@ -11,8 +11,8 @@ use reqwest::{self, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc, Mutex, RwLock,
+    atomic::{AtomicU64, Ordering},
 };
 use tokio::time::Instant;
 
@@ -24,6 +24,7 @@ pub struct ApiClient {
     client: reqwest::Client,
     req_id: Arc<AtomicU64>,
     agent_token: Arc<RwLock<Option<String>>>,
+    slice_id: Arc<RwLock<Option<String>>>,
     next_request_ts: Arc<Mutex<Option<Instant>>>,
     interceptors: Arc<Vec<Arc<dyn ApiInterceptor + 'static>>>,
 }
@@ -43,6 +44,7 @@ impl ApiClient {
             base_url: CONFIG.api_base_url.to_string(),
             req_id: Arc::new(AtomicU64::new(0)),
             agent_token: Arc::new(RwLock::new(None)),
+            slice_id: Arc::new(RwLock::new(None)),
             next_request_ts: Arc::new(Mutex::new(None)),
             interceptors: Arc::new(interceptors),
         }
@@ -56,6 +58,14 @@ impl ApiClient {
         *agent_token = Some(token.to_string());
     }
 
+    pub fn set_slice_id(&self, id: &str) {
+        let mut slice_id = self.slice_id.write().unwrap();
+        if slice_id.is_some() {
+            panic!("Cannot set slice id while slice id is already set");
+        }
+        *slice_id = Some(id.to_string());
+    }
+
     // pub async fn status(&self) -> Status {
     //     self.get("/").await
     // }
@@ -66,6 +76,10 @@ impl ApiClient {
 
     pub fn agent_token(&self) -> Option<String> {
         self.agent_token.read().unwrap().clone()
+    }
+
+    pub fn slice_id(&self) -> Option<String> {
+        self.slice_id.read().unwrap().clone()
     }
 
     pub async fn register(&self, faction: &str, callsign: &str) -> String {
@@ -351,7 +365,15 @@ impl ApiClient {
 
         // Call after_response interceptor
         for interceptor in self.interceptors.iter() {
+            let slice_id = match self.slice_id() {
+                Some(slice_id) => slice_id,
+                None => {
+                    warn!("Slice ID not set, skipping message");
+                    continue;
+                }
+            };
             interceptor.after_response(
+                &slice_id,
                 req_id,
                 &method,
                 path,

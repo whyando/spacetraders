@@ -13,21 +13,21 @@ use crate::{
 };
 use chrono::Utc;
 use dashmap::DashMap;
-use diesel::sql_types::{Integer, Text};
-use diesel::upsert::excluded;
 use diesel::ExpressionMethods as _;
 use diesel::OptionalExtension as _;
 use diesel::QueryDsl as _;
 use diesel::QueryableByName;
 use diesel::SelectableHelper as _;
-use diesel_async::pooled_connection::deadpool::Object;
-use diesel_async::pooled_connection::deadpool::Pool;
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel::sql_types::{Integer, Text};
+use diesel::upsert::excluded;
 use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl as _;
+use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel_async::pooled_connection::deadpool::Object;
+use diesel_async::pooled_connection::deadpool::Pool;
 use log::*;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -37,16 +37,11 @@ pub struct DbClient {
 }
 
 impl DbClient {
-    pub async fn new(reset_date: &str) -> DbClient {
+    pub async fn new(slice_id: &str) -> DbClient {
         let database_url = std::env::var("POSTGRES_URI").expect("POSTGRES_URI must be set");
-        let pg_schema = std::env::var("POSTGRES_SCHEMA").expect("POSTGRES_SCHEMA must be set");
-        let schema_name = pg_schema.replace("{RESET_DATE}", &reset_date.replace("-", ""));
-        info!("Using schema: {}", schema_name);
+        info!("Using schema: {}", slice_id);
         let db = {
-            let database_url = format!(
-                "{}?options=-c%20search_path%3D{}",
-                database_url, schema_name
-            );
+            let database_url = format!("{}?options=-c%20search_path%3D{}", database_url, slice_id);
             let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
             Pool::builder(manager).max_size(5).build().unwrap()
         };
@@ -76,11 +71,11 @@ impl DbClient {
                 .await
                 .unwrap();
             assert_eq!(result.len(), 1);
-            assert_eq!(result[0].search_path, schema_name);
+            assert_eq!(result[0].search_path, slice_id);
             info!("Successfully connected to database");
         }
         let db = DbClient { db };
-        db.create_schema(&schema_name).await;
+        db.create_schema(&slice_id).await;
         db
     }
 

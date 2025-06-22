@@ -1,10 +1,10 @@
 pub mod pathfinding;
 
-use crate::api_client::api_models::{self, WaypointDetailed};
 use crate::api_client::ApiClient;
+use crate::api_client::api_models::{self, WaypointDetailed};
+use crate::database::DbClient;
 use crate::database::db_models;
 use crate::database::db_models::NewWaypointDetails;
-use crate::database::DbClient;
 use crate::models::{
     Construction, Data, Faction, Market, MarketRemoteView, ShipFlightMode, Shipyard,
     ShipyardRemoteView, System, SystemSymbol, Waypoint, WaypointSymbol, WithTimestamp,

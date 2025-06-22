@@ -41,8 +41,9 @@ pub async fn init_kafka_topic() {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiRequest {
-    pub timestamp: DateTime<Utc>,
+    pub slice_id: String,
     pub request_id: u64,
+    pub timestamp: DateTime<Utc>,
     pub method: String,
     pub path: String,
     pub status: u16,
@@ -107,7 +108,8 @@ impl KafkaInterceptor {
 impl ApiInterceptor for KafkaInterceptor {
     fn after_response(
         &self,
-        req_id: u64,
+        slice_id: &str,
+        request_id: u64,
         method: &Method,
         path: &str,
         status: StatusCode,
@@ -115,8 +117,9 @@ impl ApiInterceptor for KafkaInterceptor {
         response_body: &str,
     ) {
         let message = KafkaMessage::ApiRequest(ApiRequest {
+            slice_id: slice_id.to_string(),
+            request_id,
             timestamp: Utc::now(),
-            request_id: req_id,
             method: method.to_string(),
             path: path.to_string(),
             status: status.as_u16(),

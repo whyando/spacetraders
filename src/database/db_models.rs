@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use diesel::{
-    associations::Associations, Identifiable, Insertable, Queryable, QueryableByName, Selectable,
+    Identifiable, Insertable, Queryable, QueryableByName, Selectable, associations::Associations,
 };
 use serde_json::Value;
 

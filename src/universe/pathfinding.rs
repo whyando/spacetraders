@@ -2,7 +2,7 @@ use super::Universe;
 use crate::models::{SystemSymbol, WaypointSymbol};
 use log::*;
 use quadtree_rs::area::AreaBuilder;
-use quadtree_rs::{point::Point, Quadtree};
+use quadtree_rs::{Quadtree, point::Point};
 use std::cmp::max;
 use std::collections::BTreeMap;
 

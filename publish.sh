@@ -9,10 +9,8 @@ VERSION=$(grep '^version = ' Cargo.toml | cut -d'"' -f2)
 echo "Building version: $VERSION"
 
 # Build the image
-docker build -t ${REGISTRY}/${IMAGE_NAME}:${VERSION} -t ${REGISTRY}/${IMAGE_NAME}:latest .
-
-# Push the images
+docker buildx build -t ${REGISTRY}/${IMAGE_NAME}:${VERSION} .
+# Push the image
 docker push ${REGISTRY}/${IMAGE_NAME}:${VERSION}
-docker push ${REGISTRY}/${IMAGE_NAME}:latest
 
 echo "Successfully built and pushed ${REGISTRY}/${IMAGE_NAME}:${VERSION}"

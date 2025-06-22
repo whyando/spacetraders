@@ -4,7 +4,7 @@ use std::{
     pin::Pin,
     sync::Arc,
 };
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::models::WaypointSymbol;
 

@@ -74,17 +74,24 @@ lazy_static! {
     pub static ref KAFKA_TOPIC: &'static str = "api-requests";
     pub static ref KAFKA_CONFIG: rdkafka::ClientConfig = {
         let kafka_url = std::env::var("KAFKA_URL").expect("KAFKA_URL must be set");
-        let kafka_username = std::env::var("KAFKA_USERNAME").expect("KAFKA_USERNAME must be set");
-        let kafka_password = std::env::var("KAFKA_PASSWORD").expect("KAFKA_PASSWORD must be set");
+        // let kafka_username = std::env::var("KAFKA_USERNAME").expect("KAFKA_USERNAME must be set");
+        //let kafka_password = std::env::var("KAFKA_PASSWORD").expect("KAFKA_PASSWORD must be set");
         let mut config = rdkafka::ClientConfig::new();
+        // config
+        //     .set("bootstrap.servers", kafka_url)
+        //     .set("security.protocol", "SASL_PLAINTEXT")
+        //     .set("sasl.mechanism", "PLAIN")
+        //     // jpa note: use PLAIN for now, seems like SCRAM is broken atm in the rdkafka crate (perhaps since kafka 4.0.0)
+        //     // .set("sasl.mechanism", "SCRAM-SHA-256")
+        //     .set("sasl.username", kafka_username)
+        //     .set("sasl.password", kafka_password);
+
+        // Disable SASL entirely
         config
             .set("bootstrap.servers", kafka_url)
-            .set("security.protocol", "SASL_PLAINTEXT")
-            .set("sasl.mechanism", "PLAIN")
-            // jpa note: use PLAIN for now, seems like SCRAM is broken atm in the rdkafka crate (perhaps since kafka 4.0.0)
-            // .set("sasl.mechanism", "SCRAM-SHA-256")
-            .set("sasl.username", kafka_username)
-            .set("sasl.password", kafka_password);
+            .set("security.protocol", "PLAINTEXT");
         config
     };
 }
+
+lazy_static! {}

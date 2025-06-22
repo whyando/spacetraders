@@ -1,8 +1,8 @@
 use log::*;
 use reqwest::StatusCode;
 use st::agent_controller::AgentController;
-use st::api_client::kafka_interceptor::KafkaInterceptor;
 use st::api_client::ApiClient;
+use st::api_client::kafka_interceptor::KafkaInterceptor;
 use st::config::CONFIG;
 use st::database::DbClient;
 use st::models::Faction;
@@ -43,9 +43,16 @@ async fn main() {
     };
 
     info!("Reset date: {:?}", status.reset_date);
+    // Generate a slice ID to be used as postgres schema name
+    let slice_id = {
+        let pg_schema = std::env::var("POSTGRES_SCHEMA").expect("POSTGRES_SCHEMA must be set");
+        let slice_id = pg_schema.replace("{RESET_DATE}", &status.reset_date.replace("-", ""));
+        slice_id
+    };
+    api_client.set_slice_id(&slice_id);
 
     // Use the reset date on the status response as a unique identifier to partition data between resets
-    let db = DbClient::new(&status.reset_date).await;
+    let db = DbClient::new(&slice_id).await;
 
     let universe = Arc::new(Universe::new(&api_client, &db).await);
 

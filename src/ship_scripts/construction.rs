@@ -14,10 +14,10 @@ use crate::{
     ship_controller::ShipController,
     universe::WaypointFilter,
 };
+use ConstructionHaulerState::*;
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::min;
-use ConstructionHaulerState::*;
 
 async fn get_export_market(ship: &ShipController, good: &str) -> WaypointSymbol {
     let filters = vec![WaypointFilter::Exports(good.to_string())];
