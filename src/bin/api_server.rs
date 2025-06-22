@@ -69,15 +69,18 @@ async fn main() {
     // Health check endpoint
     let health = warp::path("health").and(warp::get()).map(|| "OK");
 
-    let routes = get_log
+    // Main API routes
+    let api_routes = get_log
         .or(get_events)
         .or(get_entity_events)
         .or(get_entity_state)
         .or(get_entity_current)
         .or(get_snapshot)
-        .or(health)
         .with(warp::cors().allow_any_origin())
         .with(warp::log("api_server"));
+
+    // Add health separately to avoid logging
+    let routes = health.or(api_routes);
 
     info!("Starting API server...");
     warp::serve(routes).run(([0, 0, 0, 0], 8080)).await;
