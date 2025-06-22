@@ -1,5 +1,5 @@
 use crate::agent_controller::Event;
-use crate::api_client::api_models::{NavigateResponse, OrbitResponse, TradeResponse};
+use crate::api_client::api_models::{NavigateResponse, OrbitResponse, RefuelResponse, TradeResponse};
 use crate::models::{ShipCargoItem, ShipCooldown, Survey};
 use crate::ship_controller::ShipNavStatus::*;
 use crate::{
@@ -341,14 +341,6 @@ impl ShipController {
     // If from_cargo is true, refuel from cargo, and we must check after the refuel whether the refuel suceeded
     // Whereas if buying from market, we can safely assume we can obtain the required amount
     pub async fn refuel(&self, required_fuel: i64, from_cargo: bool) {
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        struct RefuelResponse {
-            agent: Agent,
-            fuel: ShipFuel,
-            transaction: MarketTransaction,
-            cargo: Option<ShipCargo>,
-        }
-
         assert!(!self.is_in_transit(), "Ship is in transit");
         assert!(
             required_fuel <= self.fuel_capacity(),

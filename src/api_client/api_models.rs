@@ -109,6 +109,14 @@ pub struct TradeResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefuelResponse {
+    pub agent: models::Agent,
+    pub fuel: models::ShipFuel,
+    pub transaction: models::MarketTransaction,
+    pub cargo: Option<models::ShipCargo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NavigateResponse {
     pub nav: models::ShipNav,
     pub fuel: models::ShipFuel,

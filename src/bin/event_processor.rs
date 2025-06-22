@@ -10,6 +10,7 @@ use regex::Regex;
 use st::api_client::api_models::BuyShipResponse;
 use st::api_client::api_models::NavigateResponse;
 use st::api_client::api_models::OrbitResponse;
+use st::api_client::api_models::TradeResponse;
 use st::api_client::kafka_interceptor::ApiRequest;
 use st::config::{KAFKA_CONFIG, KAFKA_TOPIC};
 use st::event_log::models::ShipEntity;
@@ -37,7 +38,7 @@ async fn main() {
 
     // Set a group_id directly for testing purposes
     // let id = Utc::now().timestamp();
-    let group_id = format!("event-processor-test-7");
+    let group_id = format!("event-processor-test-8");
 
     let consumer: StreamConsumer = KAFKA_CONFIG
         .clone()
@@ -84,11 +85,12 @@ impl Worker {
         );
 
         // 1. use the path to identify the relevant event log id and entity(s)
-        let log_id = &req.slice_id;
+        let log_id = format!("{}-8", req.slice_id);
 
         let mut ship_updates: BTreeMap<String, Ship> = BTreeMap::new();
         let mut ship_nav_updates: BTreeMap<String, ShipNav> = BTreeMap::new();
         let mut ship_fuel_updates: BTreeMap<String, ShipFuel> = BTreeMap::new();
+        let mut ship_cargo_updates: BTreeMap<String, st::models::ShipCargo> = BTreeMap::new();
 
         // Match on the api request path using specific regex patterns
         let (path, _query_params) = parse_path(&req.path);
@@ -122,10 +124,32 @@ impl Worker {
                 let resp: Data<BuyShipResponse> = serde_json::from_str(&req.response_body).unwrap();
                 ship_updates.insert(resp.data.ship.symbol.clone(), resp.data.ship);
             }
+            Endpoint::PostShipRefuel(ship_symbol) => {
+                #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+                struct RefuelResponse {
+                    agent: st::models::Agent,
+                    fuel: st::models::ShipFuel,
+                    transaction: st::models::MarketTransaction,
+                    cargo: Option<st::models::ShipCargo>,
+                }
+                let resp: Data<RefuelResponse> = serde_json::from_str(&req.response_body).unwrap();
+                ship_fuel_updates.insert(ship_symbol.clone(), resp.data.fuel);
+                if let Some(cargo) = resp.data.cargo {
+                    ship_cargo_updates.insert(ship_symbol.clone(), cargo);
+                }
+            }
+            Endpoint::PostShipPurchase(ship_symbol) => {
+                let resp: Data<TradeResponse> = serde_json::from_str(&req.response_body).unwrap();
+                ship_cargo_updates.insert(ship_symbol.clone(), resp.data.cargo);
+            }
+            Endpoint::PostShipSell(ship_symbol) => {
+                let resp: Data<TradeResponse> = serde_json::from_str(&req.response_body).unwrap();
+                ship_cargo_updates.insert(ship_symbol.clone(), resp.data.cargo);
+            }
             Endpoint::Other => {}
         }
 
-        if ship_updates.is_empty() && ship_nav_updates.is_empty() && ship_fuel_updates.is_empty() {
+        if ship_updates.is_empty() && ship_nav_updates.is_empty() && ship_fuel_updates.is_empty() && ship_cargo_updates.is_empty() {
             return;
         }
 
@@ -133,14 +157,16 @@ impl Worker {
             .keys()
             .chain(ship_nav_updates.keys())
             .chain(ship_fuel_updates.keys())
+            .chain(ship_cargo_updates.keys())
             .collect();
         for symbol in uniq_ship_symbols {
             self.process_ship_req(
-                log_id,
+                &log_id,
                 symbol,
                 ship_updates.get(symbol),
                 ship_nav_updates.get(symbol),
                 ship_fuel_updates.get(symbol),
+                ship_cargo_updates.get(symbol),
             )
             .await;
         }
@@ -153,8 +179,9 @@ impl Worker {
         ship_update: Option<&Ship>,
         ship_nav_update: Option<&ShipNav>,
         ship_fuel_update: Option<&ShipFuel>,
+        ship_cargo_update: Option<&st::models::ShipCargo>,
     ) {
-        assert!(ship_update.is_some() || ship_nav_update.is_some() || ship_fuel_update.is_some());
+        assert!(ship_update.is_some() || ship_nav_update.is_some() || ship_fuel_update.is_some() || ship_cargo_update.is_some());
         let current_state = self.scylla.get_entity(log_id, ship_symbol).await;
         let ship_entity_prev: Option<ShipEntity> = current_state
             .as_ref()
@@ -163,11 +190,11 @@ impl Worker {
         // Get the latest ship entity
         let ship_entity: ShipEntity = match ship_update {
             Some(ship) => {
-                assert!(ship_nav_update.is_none() && ship_fuel_update.is_none());
+                assert!(ship_nav_update.is_none() && ship_fuel_update.is_none() && ship_cargo_update.is_none());
                 to_ship_entity(ship)
             }
             None => {
-                assert!(ship_nav_update.is_some() || ship_fuel_update.is_some());
+                assert!(ship_nav_update.is_some() || ship_fuel_update.is_some() || ship_cargo_update.is_some());
                 let mut ship_entity = match &ship_entity_prev {
                     Some(ship_entity_prev) => ship_entity_prev.clone(),
                     None => {
@@ -183,6 +210,9 @@ impl Worker {
                 }
                 if let Some(ship_fuel_update) = ship_fuel_update {
                     apply_ship_fuel(&mut ship_entity, ship_fuel_update);
+                }
+                if let Some(ship_cargo_update) = ship_cargo_update {
+                    apply_ship_cargo(&mut ship_entity, ship_cargo_update);
                 }
                 ship_entity
             }
@@ -315,6 +345,9 @@ enum Endpoint {
     PostShipDock(String),
     PostShipOrbit(String),
     PostShipNavigate(String),
+    PostShipRefuel(String),
+    PostShipPurchase(String),
+    PostShipSell(String),
     Other,
 }
 
@@ -325,6 +358,9 @@ fn endpoint(method: &str, path: &str) -> Endpoint {
             Regex::new(r"^/my/ships/([^/]+)/navigate$").unwrap();
         static ref SHIP_DOCK_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/dock$").unwrap();
         static ref SHIP_ORBIT_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/orbit$").unwrap();
+        static ref SHIP_REFUEL_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/refuel$").unwrap();
+        static ref SHIP_PURCHASE_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/purchase$").unwrap();
+        static ref SHIP_SELL_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/sell$").unwrap();
     }
 
     match method {
@@ -354,6 +390,18 @@ fn endpoint(method: &str, path: &str) -> Endpoint {
                 let captures = SHIP_ORBIT_REGEX.captures(path).unwrap();
                 let ship_symbol = captures.get(1).unwrap().as_str().to_string();
                 Endpoint::PostShipOrbit(ship_symbol)
+            } else if SHIP_REFUEL_REGEX.is_match(path) {
+                let captures = SHIP_REFUEL_REGEX.captures(path).unwrap();
+                let ship_symbol = captures.get(1).unwrap().as_str().to_string();
+                Endpoint::PostShipRefuel(ship_symbol)
+            } else if SHIP_PURCHASE_REGEX.is_match(path) {
+                let captures = SHIP_PURCHASE_REGEX.captures(path).unwrap();
+                let ship_symbol = captures.get(1).unwrap().as_str().to_string();
+                Endpoint::PostShipPurchase(ship_symbol)
+            } else if SHIP_SELL_REGEX.is_match(path) {
+                let captures = SHIP_SELL_REGEX.captures(path).unwrap();
+                let ship_symbol = captures.get(1).unwrap().as_str().to_string();
+                Endpoint::PostShipSell(ship_symbol)
             } else {
                 Endpoint::Other
             }
@@ -401,6 +449,14 @@ fn apply_ship_nav(ship_entity: &mut ShipEntity, nav: &ShipNav) {
 
 fn apply_ship_fuel(ship_entity: &mut ShipEntity, fuel: &ShipFuel) {
     ship_entity.fuel = fuel.current;
+}
+
+fn apply_ship_cargo(ship_entity: &mut ShipEntity, cargo: &st::models::ShipCargo) {
+    ship_entity.cargo = cargo
+        .inventory
+        .iter()
+        .map(|item| (item.symbol.clone(), item.units))
+        .collect();
 }
 
 fn get_ship_entity_update(prev: &ShipEntity, new: &ShipEntity) -> ShipEntityUpdate {
