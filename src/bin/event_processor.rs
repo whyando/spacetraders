@@ -37,7 +37,7 @@ async fn main() {
 
     // Set a group_id and log_id directly for testing purposes
     // let id = Utc::now().timestamp();
-    let id = "tst4378-4";
+    let id = "tst4378-6";
     let group_id = format!("event-processor-test-{}", id);
     let log_id = format!("ships-list-test-{}", id);
 

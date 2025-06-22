@@ -21,14 +21,23 @@ pub struct ShipEntity {
 /// All fields are optional, and only the fields that are provided are to be updated.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ShipEntityUpdate {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub speed: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub waypoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_docked: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fuel: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cargo: Option<BTreeMap<String, i64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub nav_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub nav_arrival_time: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub nav_departure_time: Option<i64>,
 }
 

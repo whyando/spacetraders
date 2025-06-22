@@ -40,7 +40,7 @@ pub struct Snapshot {
     pub entity_seq_num: i64,
 }
 
-#[derive(Debug, DeserializeRow, SerializeRow)]
+#[derive(Debug, Clone, DeserializeRow, SerializeRow, Serialize, Deserialize)]
 pub struct EventLog {
     pub event_log_id: String,
     pub last_seq_num: i64,
@@ -126,7 +126,7 @@ impl ScyllaClient {
         let mut query_str = "SELECT * FROM spacetraders.events WHERE event_log_id = ?".to_string();
 
         if let Some(_from_seq) = from_seq_num {
-            query_str.push_str(" AND seq_num > ?");
+            query_str.push_str(" AND seq_num >= ?");
         }
 
         query_str.push_str(" ORDER BY seq_num ASC");
