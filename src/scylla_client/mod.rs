@@ -29,7 +29,7 @@ pub struct Event {
     pub event_data: String,
 }
 
-#[derive(Debug, DeserializeRow, SerializeRow)]
+#[derive(Debug, DeserializeRow, SerializeRow, Serialize, Deserialize)]
 pub struct Snapshot {
     pub event_log_id: String,
     pub entity_id: String,
@@ -291,5 +291,28 @@ impl ScyllaClient {
 
         let rows = result.into_rows_result()?;
         Ok(rows.rows::<Snapshot>()?.map(|row| row.unwrap()).collect())
+    }
+
+    /// Get the most recent snapshot with seq_num <= target_seq_num for a specific entity
+    pub async fn get_snapshot_at_or_before(
+        &self,
+        event_log_id: &str,
+        entity_id: &str,
+        target_seq_num: i64,
+    ) -> Option<Snapshot> {
+        let query = Statement::new(
+            "SELECT * FROM spacetraders.snapshots WHERE event_log_id = ? AND entity_id = ? AND seq_num <= ? ORDER BY seq_num DESC LIMIT 1",
+        );
+        let result = self
+            .session
+            .query_unpaged(query, &(event_log_id.to_string(), entity_id.to_string(), target_seq_num))
+            .await
+            .unwrap();
+
+        let rows = result.into_rows_result().unwrap();
+        rows.rows::<Snapshot>()
+            .unwrap()
+            .next()
+            .map(|row| row.unwrap())
     }
 }
