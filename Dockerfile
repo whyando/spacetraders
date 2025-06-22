@@ -19,5 +19,6 @@ RUN apk add --no-cache ca-certificates
 
 # Copy the binary from builder
 COPY --from=builder /usr/src/app/target/x86_64-unknown-linux-musl/release/main /app/main
+COPY --from=builder /usr/src/app/target/x86_64-unknown-linux-musl/release/event_processor /app/event_processor
+COPY --from=builder /usr/src/app/target/x86_64-unknown-linux-musl/release/api_server /app/api_server
 
-CMD ["/app/main"]
