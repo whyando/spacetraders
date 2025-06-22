@@ -1,16 +1,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "st_event_processor.fullname" . }}
+  name: {{ include "st-event-processor.fullname" . }}
   labels:
-    {{- include "st_event_processor.labels" . | nindent 4 }}
+    {{- include "st-event-processor.labels" . | nindent 4 }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
   selector:
     matchLabels:
-      {{- include "st_event_processor.selectorLabels" . | nindent 6 }}
+      {{- include "st-event-processor.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -18,7 +18,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "st_event_processor.labels" . | nindent 8 }}
+        {{- include "st-event-processor.labels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
