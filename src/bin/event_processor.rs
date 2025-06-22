@@ -35,11 +35,9 @@ async fn main() {
 
     let worker = Worker::new().await;
 
-    // Set a group_id and log_id directly for testing purposes
+    // Set a group_id directly for testing purposes
     // let id = Utc::now().timestamp();
-    let id = "tst4378-6";
-    let group_id = format!("event-processor-test-{}", id);
-    let log_id = format!("ships-list-test-{}", id);
+    let group_id = format!("event-processor-test-7");
 
     let consumer: StreamConsumer = KAFKA_CONFIG
         .clone()
@@ -58,7 +56,7 @@ async fn main() {
         let payload = message.payload().unwrap();
         if topic == *KAFKA_TOPIC {
             let api_request: ApiRequest = serde_json::from_slice(&payload).unwrap();
-            worker.process_api_request(&log_id, api_request).await;
+            worker.process_api_request(api_request).await;
         } else {
             panic!("Unknown topic: {}", topic);
         }
@@ -79,13 +77,14 @@ impl Worker {
         }
     }
 
-    pub async fn process_api_request(&self, log_id: &str, req: ApiRequest) {
+    pub async fn process_api_request(&self, req: ApiRequest) {
         info!(
             "Received api request: {} {} {} {}",
             req.request_id, req.status, req.method, req.path
         );
 
         // 1. use the path to identify the relevant event log id and entity(s)
+        let log_id = &req.slice_id;
 
         let mut ship_updates: BTreeMap<String, Ship> = BTreeMap::new();
         let mut ship_nav_updates: BTreeMap<String, ShipNav> = BTreeMap::new();
