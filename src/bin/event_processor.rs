@@ -5,11 +5,12 @@ use rdkafka::consumer::CommitMode;
 use rdkafka::consumer::Consumer as _;
 use rdkafka::consumer::StreamConsumer;
 use rdkafka::message::Message as _;
-use serde::{Deserialize, Serialize};
 use st::api_client::api_models::*;
 use st::api_client::kafka_interceptor::ApiRequest;
 use st::api_client::routes::{Endpoint, endpoint};
 use st::config::{KAFKA_CONFIG, KAFKA_TOPIC};
+use st::event_log::models::AgentEntity;
+use st::event_log::models::AgentEntityUpdate;
 use st::event_log::models::ShipEntity;
 use st::event_log::models::ShipEntityUpdate;
 use st::models::*;
@@ -238,6 +239,7 @@ impl Worker {
             && ship_nav_updates.is_empty()
             && ship_fuel_updates.is_empty()
             && ship_cargo_updates.is_empty()
+            && agent_updates.is_empty()
         {
             return;
         }
@@ -258,6 +260,11 @@ impl Worker {
                 ship_cargo_updates.get(symbol),
             )
             .await;
+        }
+
+        // Process agent updates
+        for agent_update in agent_updates.values() {
+            self.process_agent_req(&log_id, agent_update).await;
         }
     }
 
@@ -334,6 +341,37 @@ impl Worker {
             ship_symbol,
             "ship",
             &serde_json::to_string(&ship_entity).unwrap(),
+            &serde_json::to_string(&update).unwrap(),
+        )
+        .await;
+    }
+
+    async fn process_agent_req(&self, log_id: &str, agent_update: &Agent) {
+        let current_state = self.scylla.get_entity(log_id, &agent_update.symbol).await;
+        let agent_entity_prev: Option<AgentEntity> = current_state
+            .as_ref()
+            .map(|state| serde_json::from_str(&state.state_data).unwrap());
+
+        // Convert the new agent to AgentEntity
+        let new_agent_entity = to_agent_entity(agent_update);
+
+        // Compare the previous and new agent entities to determine if anything has changed
+        if let Some(prev_agent_entity) = &agent_entity_prev {
+            if prev_agent_entity == &new_agent_entity {
+                return;
+            }
+        }
+
+        let prev = agent_entity_prev.unwrap_or_else(|| new_agent_entity.clone());
+        let update = get_agent_entity_update(&prev, &new_agent_entity);
+        debug!("Agent {} entity update: {:?}", agent_update.symbol, update);
+
+        self.update_entity(
+            log_id,
+            current_state,
+            &agent_update.symbol,
+            "agent",
+            &serde_json::to_string(&new_agent_entity).unwrap(),
             &serde_json::to_string(&update).unwrap(),
         )
         .await;
@@ -519,4 +557,34 @@ fn get_ship_entity_update(prev: &ShipEntity, new: &ShipEntity) -> ShipEntityUpda
         update.nav_departure_time = Some(new.nav_departure_time);
     }
     update
+}
+
+fn get_agent_entity_update(prev: &AgentEntity, new: &AgentEntity) -> AgentEntityUpdate {
+    let mut update = AgentEntityUpdate::default();
+    if prev.symbol != new.symbol {
+        update.symbol = Some(new.symbol.clone());
+    }
+    if prev.headquarters != new.headquarters {
+        update.headquarters = Some(new.headquarters.clone());
+    }
+    if prev.credits != new.credits {
+        update.credits = Some(new.credits);
+    }
+    if prev.starting_faction != new.starting_faction {
+        update.starting_faction = Some(new.starting_faction.clone());
+    }
+    if prev.ship_count != new.ship_count {
+        update.ship_count = Some(new.ship_count);
+    }
+    update
+}
+
+fn to_agent_entity(agent: &Agent) -> AgentEntity {
+    AgentEntity {
+        symbol: agent.symbol.clone(),
+        headquarters: agent.headquarters.to_string(),
+        credits: agent.credits,
+        starting_faction: agent.starting_faction.clone(),
+        ship_count: agent.ship_count as i64,
+    }
 }

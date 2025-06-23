@@ -3,7 +3,7 @@ use crate::api_client::api_models::{
     ExtractResponse, JettisonResponse, NavigateResponse, OrbitResponse, RefuelResponse,
     SiphonResponse, SurveyResponse, TradeResponse,
 };
-use crate::models::{ShipCargoItem, ShipCooldown, Survey};
+use crate::models::{ShipCargoItem, ShipCooldown};
 use crate::ship_controller::ShipNavStatus::*;
 use crate::{
     agent_controller::AgentController, api_client::ApiClient, models::*, universe::Universe,
