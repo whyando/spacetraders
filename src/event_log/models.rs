@@ -135,8 +135,16 @@ pub struct SystemEntity {
     pub type_: String,
     pub x: i64,
     pub y: i64,
-    pub waypoints: Vec<String>,
-    pub factions: Vec<String>,
+    pub waypoints: Vec<WaypointEntity>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct WaypointEntity {
+    pub symbol: String,
+    pub waypoint_type: String,
+    pub x: i64,
+    pub y: i64,
+    pub traits: Vec<String>,
 }
 
 /// Event for updating a system's state.
@@ -154,9 +162,7 @@ pub struct SystemEntityUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub y: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub waypoints: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub factions: Option<Vec<String>>,
+    pub waypoints: Option<Vec<WaypointEntity>>,
 }
 
 impl std::fmt::Debug for SystemEntityUpdate {
@@ -180,9 +186,6 @@ impl std::fmt::Debug for SystemEntityUpdate {
         }
         if let Some(waypoints) = &self.waypoints {
             fields.push(format!("waypoints: {:?}", waypoints));
-        }
-        if let Some(factions) = &self.factions {
-            fields.push(format!("factions: {:?}", factions));
         }
 
         write!(f, "SystemEntityUpdate {{ {} }}", fields.join(", "))

@@ -13,6 +13,9 @@ use st::event_log::models::AgentEntity;
 use st::event_log::models::AgentEntityUpdate;
 use st::event_log::models::ShipEntity;
 use st::event_log::models::ShipEntityUpdate;
+use st::event_log::models::SystemEntity;
+use st::event_log::models::SystemEntityUpdate;
+use st::event_log::models::WaypointEntity;
 use st::models::*;
 use st::scylla_client::CurrentState;
 use st::scylla_client::Event;
@@ -22,7 +25,7 @@ use st::scylla_client::Snapshot;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-const TEST_ID: &str = "15";
+const TEST_ID: &str = "16";
 
 #[tokio::main]
 async fn main() {
@@ -96,6 +99,8 @@ impl Worker {
         let mut ship_cargo_updates: BTreeMap<String, st::models::ShipCargo> = BTreeMap::new();
 
         let mut agent_updates: BTreeMap<String, Agent> = BTreeMap::new();
+        let mut system_updates: BTreeMap<String, st::api_client::api_models::System> =
+            BTreeMap::new();
 
         // Match on the api request path using specific regex patterns
         let (path, _query_params) = parse_path(&req.path);
@@ -205,10 +210,10 @@ impl Worker {
                         serde_json::from_str(&req.response_body).unwrap();
                     // Survey doesn't update ship state, just provides survey data
                 }
-                Endpoint::GetSystem(_system_symbol) => {
-                    // Universe data - no ship updates needed
-                    let _system: Data<st::api_client::api_models::System> =
+                Endpoint::GetSystem(system_symbol) => {
+                    let system: Data<st::api_client::api_models::System> =
                         serde_json::from_str(&req.response_body).unwrap();
+                    system_updates.insert(system_symbol, system.data);
                 }
                 Endpoint::GetSystemWaypoints(_system_symbol) => {
                     // Universe data - no ship updates needed
@@ -240,10 +245,12 @@ impl Worker {
             && ship_fuel_updates.is_empty()
             && ship_cargo_updates.is_empty()
             && agent_updates.is_empty()
+            && system_updates.is_empty()
         {
             return;
         }
 
+        // Process ship updates
         let uniq_ship_symbols: BTreeSet<&String> = ship_updates
             .keys()
             .chain(ship_nav_updates.keys())
@@ -265,6 +272,11 @@ impl Worker {
         // Process agent updates
         for agent_update in agent_updates.values() {
             self.process_agent_req(&log_id, agent_update).await;
+        }
+
+        // Process system updates
+        for system_update in system_updates.values() {
+            self.process_system_req(&log_id, system_update).await;
         }
     }
 
@@ -333,8 +345,6 @@ impl Worker {
         }
         let prev = ship_entity_prev.unwrap_or_default();
         let update = get_ship_entity_update(&prev, &ship_entity);
-        debug!("Ship {} entity update: {:?}", ship_symbol, update);
-
         self.update_entity(
             log_id,
             current_state,
@@ -356,16 +366,12 @@ impl Worker {
         let new_agent_entity = to_agent_entity(agent_update);
 
         // Compare the previous and new agent entities to determine if anything has changed
-        if let Some(prev_agent_entity) = &agent_entity_prev {
-            if prev_agent_entity == &new_agent_entity {
-                return;
-            }
+        if agent_entity_prev.as_ref() == Some(&new_agent_entity) {
+            return;
         }
 
         let prev = agent_entity_prev.unwrap_or_else(|| new_agent_entity.clone());
         let update = get_agent_entity_update(&prev, &new_agent_entity);
-        debug!("Agent {} entity update: {:?}", agent_update.symbol, update);
-
         self.update_entity(
             log_id,
             current_state,
@@ -377,6 +383,42 @@ impl Worker {
         .await;
     }
 
+    async fn process_system_req(
+        &self,
+        log_id: &str,
+        system_update: &st::api_client::api_models::System,
+    ) {
+        let current_state = self
+            .scylla
+            .get_entity(log_id, &system_update.symbol.to_string())
+            .await;
+        let system_entity_prev: Option<SystemEntity> = current_state
+            .as_ref()
+            .map(|state| serde_json::from_str(&state.state_data).unwrap());
+
+        // Convert the new system to SystemEntity
+        let new_system_entity = to_system_entity(system_update);
+
+        // Compare the previous and new system entities to determine if anything has changed
+        if system_entity_prev.as_ref() == Some(&new_system_entity) {
+            return;
+        }
+
+        let prev = system_entity_prev.unwrap_or_else(|| new_system_entity.clone());
+        let update = get_system_entity_update(&prev, &new_system_entity);
+
+        self.update_entity(
+            log_id,
+            current_state,
+            &system_update.symbol.to_string(),
+            "system",
+            &serde_json::to_string(&new_system_entity).unwrap(),
+            &serde_json::to_string(&update).unwrap(),
+        )
+        .await;
+    }
+
+    // Insert to event log and current state tables, and optionally insert to snapshots table
     async fn update_entity(
         &self,
         log_id: &str,
@@ -386,6 +428,11 @@ impl Worker {
         state_data: &str,
         event_data: &str,
     ) {
+        debug!(
+            "{} {} entity update: {:?}",
+            entity_type, entity_id, event_data
+        );
+
         // Update Query 1: get the current seq num for the event log `event_logs` table
         let event_log = self.scylla.get_event_log(log_id).await;
         let next_seq_num = event_log.map(|log| log.last_seq_num).unwrap_or(0) + 1;
@@ -587,4 +634,48 @@ fn to_agent_entity(agent: &Agent) -> AgentEntity {
         starting_faction: agent.starting_faction.clone(),
         ship_count: agent.ship_count as i64,
     }
+}
+
+fn to_system_entity(system: &st::api_client::api_models::System) -> SystemEntity {
+    SystemEntity {
+        symbol: system.symbol.to_string(),
+        sector_symbol: system.sector_symbol.clone(),
+        type_: system.system_type.clone(),
+        x: system.x,
+        y: system.y,
+        waypoints: system
+            .waypoints
+            .iter()
+            .map(|w| WaypointEntity {
+                symbol: w.symbol.to_string(),
+                waypoint_type: w.waypoint_type.clone(),
+                x: w.x,
+                y: w.y,
+                traits: vec![], // API System doesn't include traits
+            })
+            .collect(),
+    }
+}
+
+fn get_system_entity_update(prev: &SystemEntity, new: &SystemEntity) -> SystemEntityUpdate {
+    let mut update = SystemEntityUpdate::default();
+    if prev.symbol != new.symbol {
+        update.symbol = Some(new.symbol.clone());
+    }
+    if prev.sector_symbol != new.sector_symbol {
+        update.sector_symbol = Some(new.sector_symbol.clone());
+    }
+    if prev.type_ != new.type_ {
+        update.type_ = Some(new.type_.clone());
+    }
+    if prev.x != new.x {
+        update.x = Some(new.x);
+    }
+    if prev.y != new.y {
+        update.y = Some(new.y);
+    }
+    if prev.waypoints != new.waypoints {
+        update.waypoints = Some(new.waypoints.clone());
+    }
+    update
 }
