@@ -25,7 +25,7 @@ use st::scylla_client::Snapshot;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-const TEST_ID: &str = "16";
+const TEST_ID: &str = "18";
 
 #[tokio::main]
 async fn main() {
@@ -77,6 +77,7 @@ impl Worker {
     }
 
     pub async fn process_api_request(&self, req: ApiRequest) {
+        let log_id = format!("{}-{}", req.slice_id, TEST_ID);
         if req.slice_id != "whyando_0_5_20250622" {
             return;
         }
@@ -91,8 +92,6 @@ impl Worker {
         );
 
         // 1. use the path to identify the relevant event log id and entity(s)
-        let log_id = format!("{}-{}", req.slice_id, TEST_ID);
-
         let mut ship_updates: BTreeMap<String, Ship> = BTreeMap::new();
         let mut ship_nav_updates: BTreeMap<String, ShipNav> = BTreeMap::new();
         let mut ship_fuel_updates: BTreeMap<String, ShipFuel> = BTreeMap::new();
@@ -101,6 +100,10 @@ impl Worker {
         let mut agent_updates: BTreeMap<String, Agent> = BTreeMap::new();
         let mut system_updates: BTreeMap<String, st::api_client::api_models::System> =
             BTreeMap::new();
+        let mut waypoint_trait_updates: BTreeMap<
+            String,
+            Vec<st::api_client::api_models::WaypointDetailed>,
+        > = BTreeMap::new();
 
         // Match on the api request path using specific regex patterns
         let (path, _query_params) = parse_path(&req.path);
@@ -215,10 +218,10 @@ impl Worker {
                         serde_json::from_str(&req.response_body).unwrap();
                     system_updates.insert(system_symbol, system.data);
                 }
-                Endpoint::GetSystemWaypoints(_system_symbol) => {
-                    // Universe data - no ship updates needed
-                    let _waypoints: PaginatedList<st::api_client::api_models::WaypointDetailed> =
+                Endpoint::GetSystemWaypoints(system_symbol) => {
+                    let waypoints: PaginatedList<st::api_client::api_models::WaypointDetailed> =
                         serde_json::from_str(&req.response_body).unwrap();
+                    waypoint_trait_updates.insert(system_symbol, waypoints.data);
                 }
                 Endpoint::GetWaypointMarket(_system_symbol, _waypoint_symbol) => {
                     // (Might be remote or local market)
@@ -240,14 +243,21 @@ impl Worker {
             warn!("Endpoint not matched: {} {}", req.method, req.path);
         }
 
-        if ship_updates.is_empty()
-            && ship_nav_updates.is_empty()
-            && ship_fuel_updates.is_empty()
-            && ship_cargo_updates.is_empty()
-            && agent_updates.is_empty()
-            && system_updates.is_empty()
-        {
-            return;
+        // Process agent updates
+        for agent_update in agent_updates.values() {
+            self.process_agent_req(&log_id, agent_update).await;
+        }
+
+        // Process system updates
+        for (system_symbol, system_update) in system_updates {
+            self.process_system_req(&log_id, &system_symbol, &system_update)
+                .await;
+        }
+
+        // Process waypoint-only updates (for systems that don't have a system update)
+        for (system_symbol, waypoint_updates) in waypoint_trait_updates {
+            self.process_waypoints(&log_id, &system_symbol, &waypoint_updates)
+                .await;
         }
 
         // Process ship updates
@@ -267,16 +277,6 @@ impl Worker {
                 ship_cargo_updates.get(symbol),
             )
             .await;
-        }
-
-        // Process agent updates
-        for agent_update in agent_updates.values() {
-            self.process_agent_req(&log_id, agent_update).await;
-        }
-
-        // Process system updates
-        for system_update in system_updates.values() {
-            self.process_system_req(&log_id, system_update).await;
         }
     }
 
@@ -370,7 +370,7 @@ impl Worker {
             return;
         }
 
-        let prev = agent_entity_prev.unwrap_or_else(|| new_agent_entity.clone());
+        let prev = agent_entity_prev.unwrap_or_default();
         let update = get_agent_entity_update(&prev, &new_agent_entity);
         self.update_entity(
             log_id,
@@ -386,33 +386,75 @@ impl Worker {
     async fn process_system_req(
         &self,
         log_id: &str,
+        system_symbol: &str,
         system_update: &st::api_client::api_models::System,
     ) {
-        let current_state = self
-            .scylla
-            .get_entity(log_id, &system_update.symbol.to_string())
-            .await;
+        let current_state = self.scylla.get_entity(log_id, system_symbol).await;
         let system_entity_prev: Option<SystemEntity> = current_state
             .as_ref()
             .map(|state| serde_json::from_str(&state.state_data).unwrap());
 
         // Convert the new system to SystemEntity
-        let new_system_entity = to_system_entity(system_update);
+        // !! This will overwrite the waypoints with the default traits
+        let system_entity = to_system_entity(system_update);
 
         // Compare the previous and new system entities to determine if anything has changed
-        if system_entity_prev.as_ref() == Some(&new_system_entity) {
+        if system_entity_prev.as_ref() == Some(&system_entity) {
             return;
         }
-
-        let prev = system_entity_prev.unwrap_or_else(|| new_system_entity.clone());
-        let update = get_system_entity_update(&prev, &new_system_entity);
+        let prev = system_entity_prev.unwrap_or_default();
+        let update = get_system_entity_update(&prev, &system_entity);
 
         self.update_entity(
             log_id,
             current_state,
-            &system_update.symbol.to_string(),
+            system_symbol,
             "system",
-            &serde_json::to_string(&new_system_entity).unwrap(),
+            &serde_json::to_string(&system_entity).unwrap(),
+            &serde_json::to_string(&update).unwrap(),
+        )
+        .await;
+    }
+
+    async fn process_waypoints(
+        &self,
+        log_id: &str,
+        system_symbol: &str,
+        waypoint_updates: &Vec<st::api_client::api_models::WaypointDetailed>,
+    ) {
+        let current_state = self.scylla.get_entity(log_id, system_symbol).await;
+        let system_entity_prev: Option<SystemEntity> = current_state
+            .as_ref()
+            .map(|state| serde_json::from_str(&state.state_data).unwrap());
+
+        // Get the existing system entity or skip if it doesn't exist
+        let mut system_entity = match &system_entity_prev {
+            Some(system_entity_prev) => system_entity_prev.clone(),
+            None => {
+                warn!(
+                    "No previous system entity found in scylla for {}. Skipping waypoint update.",
+                    system_symbol
+                );
+                return;
+            }
+        };
+
+        // Apply waypoint updates to existing system entity
+        apply_system_waypoints(&mut system_entity, waypoint_updates);
+
+        // Compare the previous and new system entities to determine if anything has changed
+        if system_entity_prev.as_ref() == Some(&system_entity) {
+            return;
+        }
+        let prev = system_entity_prev.unwrap_or_default();
+        let update = get_system_entity_update(&prev, &system_entity);
+
+        self.update_entity(
+            log_id,
+            current_state,
+            system_symbol,
+            "system",
+            &serde_json::to_string(&system_entity).unwrap(),
             &serde_json::to_string(&update).unwrap(),
         )
         .await;
@@ -651,7 +693,7 @@ fn to_system_entity(system: &st::api_client::api_models::System) -> SystemEntity
                 waypoint_type: w.waypoint_type.clone(),
                 x: w.x,
                 y: w.y,
-                traits: vec![], // API System doesn't include traits
+                traits: vec!["UNKNOWN".to_string()],
             })
             .collect(),
     }
@@ -678,4 +720,25 @@ fn get_system_entity_update(prev: &SystemEntity, new: &SystemEntity) -> SystemEn
         update.waypoints = Some(new.waypoints.clone());
     }
     update
+}
+
+fn apply_system_waypoints(
+    system_entity: &mut SystemEntity,
+    waypoint_updates: &Vec<st::api_client::api_models::WaypointDetailed>,
+) {
+    let waypoint_map: std::collections::HashMap<_, _> = waypoint_updates
+        .iter()
+        .map(|w| (w.symbol.as_str(), w))
+        .collect();
+
+    for w in system_entity.waypoints.iter_mut() {
+        if let Some(detailed_waypoint) = waypoint_map.get(w.symbol.as_str()) {
+            // Set the traits for the waypoint
+            w.traits = detailed_waypoint
+                .traits
+                .iter()
+                .map(|t| t.symbol.clone())
+                .collect();
+        }
+    }
 }
