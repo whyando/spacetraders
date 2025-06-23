@@ -25,7 +25,7 @@ use st::scylla_client::Snapshot;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-const TEST_ID: &str = "18";
+const TEST_ID: &str = "19";
 
 #[tokio::main]
 async fn main() {
@@ -78,9 +78,10 @@ impl Worker {
 
     pub async fn process_api_request(&self, req: ApiRequest) {
         let log_id = format!("{}-{}", req.slice_id, TEST_ID);
-        if req.slice_id != "whyando_0_5_20250622" {
-            return;
-        }
+        // if req.slice_id != "whyando_0_5_20250622" {
+        //     return;
+        // }
+
         // Only process successful requests.
         // Failed requests have more varied response formats, and usually don't result in state changes.
         if !(req.status >= 200 && req.status < 300) {
