@@ -73,9 +73,9 @@ pub async fn run_hauler(ship: ShipController, db: DbClient) {
     let key = format!("construction_state/{}", ship.symbol());
     let mut state: ConstructionHaulerState = db.get_value(&key).await.unwrap_or(Buying);
 
-    if state == TerminalState {
-        ship.refresh_shipyard().await;
-    }
+    // if state == TerminalState {
+    //     ship.refresh_shipyard().await;
+    // }
 
     while state != TerminalState {
         let next_state = tick(
