@@ -1,26 +1,18 @@
 //! Simple event processor. Process events produced by the agent and insert a condensed form into scylla db.
 use chrono::Utc;
-use lazy_static::lazy_static;
 use log::*;
 use rdkafka::consumer::CommitMode;
 use rdkafka::consumer::Consumer as _;
 use rdkafka::consumer::StreamConsumer;
 use rdkafka::message::Message as _;
-use regex::Regex;
-use st::api_client::api_models::BuyShipResponse;
-use st::api_client::api_models::NavigateResponse;
-use st::api_client::api_models::OrbitResponse;
-use st::api_client::api_models::TradeResponse;
+use serde::{Deserialize, Serialize};
+use st::api_client::api_models::*;
 use st::api_client::kafka_interceptor::ApiRequest;
+use st::api_client::routes::{Endpoint, endpoint};
 use st::config::{KAFKA_CONFIG, KAFKA_TOPIC};
 use st::event_log::models::ShipEntity;
 use st::event_log::models::ShipEntityUpdate;
-use st::models::Data;
-use st::models::PaginatedList;
-use st::models::Ship;
-use st::models::ShipFuel;
-use st::models::ShipNav;
-use st::models::ShipNavStatus;
+use st::models::*;
 use st::scylla_client::CurrentState;
 use st::scylla_client::Event;
 use st::scylla_client::EventLog;
@@ -28,6 +20,8 @@ use st::scylla_client::ScyllaClient;
 use st::scylla_client::Snapshot;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+
+const TEST_ID: &str = "14";
 
 #[tokio::main]
 async fn main() {
@@ -38,7 +32,7 @@ async fn main() {
 
     // Set a group_id directly for testing purposes
     // let id = Utc::now().timestamp();
-    let group_id = format!("event-processor-test-8");
+    let group_id = format!("event-processor-test-{}", TEST_ID);
 
     let consumer: StreamConsumer = KAFKA_CONFIG
         .clone()
@@ -79,74 +73,157 @@ impl Worker {
     }
 
     pub async fn process_api_request(&self, req: ApiRequest) {
+        if req.slice_id != "whyando_0_5_20250622" {
+            return;
+        }
         info!(
-            "Received api request: {} {} {} {}",
-            req.request_id, req.status, req.method, req.path
+            "Received api request: {} {} {} {} {}",
+            req.request_id, req.slice_id, req.status, req.method, req.path
         );
 
         // 1. use the path to identify the relevant event log id and entity(s)
-        let log_id = format!("{}-8", req.slice_id);
+        let log_id = format!("{}-{}", req.slice_id, TEST_ID);
 
         let mut ship_updates: BTreeMap<String, Ship> = BTreeMap::new();
         let mut ship_nav_updates: BTreeMap<String, ShipNav> = BTreeMap::new();
         let mut ship_fuel_updates: BTreeMap<String, ShipFuel> = BTreeMap::new();
         let mut ship_cargo_updates: BTreeMap<String, st::models::ShipCargo> = BTreeMap::new();
 
+        let mut agent_updates: BTreeMap<String, Agent> = BTreeMap::new();
+
         // Match on the api request path using specific regex patterns
         let (path, _query_params) = parse_path(&req.path);
-        match endpoint(&req.method, &path) {
-            Endpoint::GetShipsList => {
-                let ships_list: PaginatedList<Ship> =
-                    serde_json::from_str(&req.response_body).unwrap();
-                for ship in ships_list.data {
-                    ship_updates.insert(ship.symbol.clone(), ship);
+        if let Some(endpoint) = endpoint(&req.method, &path) {
+            match endpoint {
+                Endpoint::GetFactions => {
+                    // Universe data - no ship updates needed
+                    let _factions: PaginatedList<st::models::Faction> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                }
+                Endpoint::PostRegister => {
+                    let resp: Data<RegisterResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    agent_updates.insert(resp.data.agent.symbol.clone(), resp.data.agent);
+                }
+                Endpoint::GetAgent => {
+                    let resp: Data<Agent> = serde_json::from_str(&req.response_body).unwrap();
+                    agent_updates.insert(resp.data.symbol.clone(), resp.data);
+                }
+                Endpoint::GetShipsList => {
+                    let ships_list: PaginatedList<Ship> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    for ship in ships_list.data {
+                        ship_updates.insert(ship.symbol.clone(), ship);
+                    }
+                }
+                Endpoint::PostBuyShip => {
+                    let resp: Data<BuyShipResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    ship_updates.insert(resp.data.ship.symbol.clone(), resp.data.ship);
+                    agent_updates.insert(resp.data.agent.symbol.clone(), resp.data.agent);
+                }
+                Endpoint::GetContracts => {
+                    // Contract data - no ship updates needed
+                    let _contracts: PaginatedList<st::models::Contract> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                }
+                Endpoint::PostContractAccept(_contract_id) => {
+                    // Contract data - no ship updates needed
+                    let _contract: Data<st::models::Contract> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                }
+                Endpoint::GetShip(ship_symbol) => {
+                    let ship: Data<Ship> = serde_json::from_str(&req.response_body).unwrap();
+                    ship_updates.insert(ship_symbol, ship.data);
+                }
+                Endpoint::PatchShipNav(ship_symbol) => {
+                    let resp: Data<OrbitResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    ship_nav_updates.insert(ship_symbol, resp.data.nav);
+                }
+                Endpoint::PostShipNavigate(ship_symbol) => {
+                    let resp: Data<NavigateResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    ship_nav_updates.insert(ship_symbol.clone(), resp.data.nav);
+                    ship_fuel_updates.insert(ship_symbol.clone(), resp.data.fuel);
+                }
+                Endpoint::PostShipDock(ship_symbol) => {
+                    let resp: Data<OrbitResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    ship_nav_updates.insert(ship_symbol, resp.data.nav);
+                }
+                Endpoint::PostShipOrbit(ship_symbol) => {
+                    let resp: Data<OrbitResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    ship_nav_updates.insert(ship_symbol, resp.data.nav);
+                }
+                Endpoint::PostShipRefuel(ship_symbol) => {
+                    let resp: Data<RefuelResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    ship_fuel_updates.insert(ship_symbol.clone(), resp.data.fuel);
+                    if let Some(cargo) = resp.data.cargo {
+                        ship_cargo_updates.insert(ship_symbol.clone(), cargo);
+                    }
+                }
+                Endpoint::PostShipPurchase(ship_symbol) => {
+                    let resp: Data<TradeResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    ship_cargo_updates.insert(ship_symbol.clone(), resp.data.cargo);
+                    agent_updates.insert(resp.data.agent.symbol.clone(), resp.data.agent);
+                }
+                Endpoint::PostShipSell(ship_symbol) => {
+                    let resp: Data<TradeResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    ship_cargo_updates.insert(ship_symbol.clone(), resp.data.cargo);
+                    agent_updates.insert(resp.data.agent.symbol.clone(), resp.data.agent);
+                }
+                Endpoint::PostShipExtractSurvey(ship_symbol) => {
+                    let resp: Data<ExtractResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    ship_cargo_updates.insert(ship_symbol, resp.data.cargo);
+                }
+                Endpoint::PostShipJettison(ship_symbol) => {
+                    let resp: Data<JettisonResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    ship_cargo_updates.insert(ship_symbol, resp.data.cargo);
+                }
+                Endpoint::PostShipTransfer(ship_symbol) => {
+                    let resp: Data<TransferResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    ship_cargo_updates.insert(ship_symbol, resp.data.cargo);
+                    // TODO: get target ship_symbol from request body and update target_cargo
+                }
+                Endpoint::PostShipSurvey(_ship_symbol) => {
+                    let _resp: Data<SurveyResponse> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                    // Survey doesn't update ship state, just provides survey data
+                }
+                Endpoint::GetSystem(_system_symbol) => {
+                    // Universe data - no ship updates needed
+                    let _system: Data<st::api_client::api_models::System> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                }
+                Endpoint::GetSystemWaypoints(_system_symbol) => {
+                    // Universe data - no ship updates needed
+                    let _waypoints: PaginatedList<st::api_client::api_models::WaypointDetailed> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                }
+                Endpoint::GetWaypointMarket(_system_symbol, _waypoint_symbol) => {
+                    // Universe data - no ship updates needed
+                    let _market: Data<st::models::Market> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                }
+                Endpoint::GetShipyard(_system_symbol, _waypoint_symbol) => {
+                    // Universe data - no ship updates needed
+                    let _shipyard: Data<st::models::Shipyard> =
+                        serde_json::from_str(&req.response_body).unwrap();
+                }
+                Endpoint::GetWaypointConstruction(_system_symbol, _waypoint_symbol) => {
+                    // Universe data - no ship updates needed
+                    let _construction: Data<st::models::Construction> =
+                        serde_json::from_str(&req.response_body).unwrap();
                 }
             }
-            Endpoint::GetShip(ship_symbol) => {
-                let ship: Data<Ship> = serde_json::from_str(&req.response_body).unwrap();
-                ship_updates.insert(ship_symbol, ship.data);
-            }
-            Endpoint::PostShipNavigate(ship_symbol) => {
-                let resp: Data<NavigateResponse> =
-                    serde_json::from_str(&req.response_body).unwrap();
-                ship_nav_updates.insert(ship_symbol.clone(), resp.data.nav);
-                ship_fuel_updates.insert(ship_symbol.clone(), resp.data.fuel);
-            }
-            Endpoint::PostShipDock(ship_symbol) => {
-                let resp: Data<OrbitResponse> = serde_json::from_str(&req.response_body).unwrap();
-                ship_nav_updates.insert(ship_symbol, resp.data.nav);
-            }
-            Endpoint::PostShipOrbit(ship_symbol) => {
-                let resp: Data<OrbitResponse> = serde_json::from_str(&req.response_body).unwrap();
-                ship_nav_updates.insert(ship_symbol, resp.data.nav);
-            }
-            Endpoint::PostBuyShip => {
-                let resp: Data<BuyShipResponse> = serde_json::from_str(&req.response_body).unwrap();
-                ship_updates.insert(resp.data.ship.symbol.clone(), resp.data.ship);
-            }
-            Endpoint::PostShipRefuel(ship_symbol) => {
-                #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-                struct RefuelResponse {
-                    agent: st::models::Agent,
-                    fuel: st::models::ShipFuel,
-                    transaction: st::models::MarketTransaction,
-                    cargo: Option<st::models::ShipCargo>,
-                }
-                let resp: Data<RefuelResponse> = serde_json::from_str(&req.response_body).unwrap();
-                ship_fuel_updates.insert(ship_symbol.clone(), resp.data.fuel);
-                if let Some(cargo) = resp.data.cargo {
-                    ship_cargo_updates.insert(ship_symbol.clone(), cargo);
-                }
-            }
-            Endpoint::PostShipPurchase(ship_symbol) => {
-                let resp: Data<TradeResponse> = serde_json::from_str(&req.response_body).unwrap();
-                ship_cargo_updates.insert(ship_symbol.clone(), resp.data.cargo);
-            }
-            Endpoint::PostShipSell(ship_symbol) => {
-                let resp: Data<TradeResponse> = serde_json::from_str(&req.response_body).unwrap();
-                ship_cargo_updates.insert(ship_symbol.clone(), resp.data.cargo);
-            }
-            Endpoint::Other => {}
         }
 
         if ship_updates.is_empty()
@@ -353,79 +430,6 @@ fn parse_path(full_path: &str) -> (String, Vec<(String, String)>) {
     }
 
     (path, query_params)
-}
-
-enum Endpoint {
-    GetShipsList,
-    GetShip(String),
-    PostBuyShip,
-    PostShipDock(String),
-    PostShipOrbit(String),
-    PostShipNavigate(String),
-    PostShipRefuel(String),
-    PostShipPurchase(String),
-    PostShipSell(String),
-    Other,
-}
-
-fn endpoint(method: &str, path: &str) -> Endpoint {
-    lazy_static! {
-        static ref SHIP_REGEX: Regex = Regex::new(r"^/my/ship/([^/]+)$").unwrap();
-        static ref SHIP_NAVIGATE_REGEX: Regex =
-            Regex::new(r"^/my/ships/([^/]+)/navigate$").unwrap();
-        static ref SHIP_DOCK_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/dock$").unwrap();
-        static ref SHIP_ORBIT_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/orbit$").unwrap();
-        static ref SHIP_REFUEL_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/refuel$").unwrap();
-        static ref SHIP_PURCHASE_REGEX: Regex =
-            Regex::new(r"^/my/ships/([^/]+)/purchase$").unwrap();
-        static ref SHIP_SELL_REGEX: Regex = Regex::new(r"^/my/ships/([^/]+)/sell$").unwrap();
-    }
-
-    match method {
-        "GET" => {
-            if path == "/my/ships" {
-                Endpoint::GetShipsList
-            } else if SHIP_REGEX.is_match(path) {
-                let captures = SHIP_REGEX.captures(path).unwrap();
-                let ship_symbol = captures.get(1).unwrap().as_str().to_string();
-                Endpoint::GetShip(ship_symbol)
-            } else {
-                Endpoint::Other
-            }
-        }
-        "POST" => {
-            if path == "/my/ships" {
-                Endpoint::PostBuyShip
-            } else if SHIP_NAVIGATE_REGEX.is_match(path) {
-                let captures = SHIP_NAVIGATE_REGEX.captures(path).unwrap();
-                let ship_symbol = captures.get(1).unwrap().as_str().to_string();
-                Endpoint::PostShipNavigate(ship_symbol)
-            } else if SHIP_DOCK_REGEX.is_match(path) {
-                let captures = SHIP_DOCK_REGEX.captures(path).unwrap();
-                let ship_symbol = captures.get(1).unwrap().as_str().to_string();
-                Endpoint::PostShipDock(ship_symbol)
-            } else if SHIP_ORBIT_REGEX.is_match(path) {
-                let captures = SHIP_ORBIT_REGEX.captures(path).unwrap();
-                let ship_symbol = captures.get(1).unwrap().as_str().to_string();
-                Endpoint::PostShipOrbit(ship_symbol)
-            } else if SHIP_REFUEL_REGEX.is_match(path) {
-                let captures = SHIP_REFUEL_REGEX.captures(path).unwrap();
-                let ship_symbol = captures.get(1).unwrap().as_str().to_string();
-                Endpoint::PostShipRefuel(ship_symbol)
-            } else if SHIP_PURCHASE_REGEX.is_match(path) {
-                let captures = SHIP_PURCHASE_REGEX.captures(path).unwrap();
-                let ship_symbol = captures.get(1).unwrap().as_str().to_string();
-                Endpoint::PostShipPurchase(ship_symbol)
-            } else if SHIP_SELL_REGEX.is_match(path) {
-                let captures = SHIP_SELL_REGEX.captures(path).unwrap();
-                let ship_symbol = captures.get(1).unwrap().as_str().to_string();
-                Endpoint::PostShipSell(ship_symbol)
-            } else {
-                Endpoint::Other
-            }
-        }
-        _ => Endpoint::Other,
-    }
 }
 
 fn to_ship_entity(ship: &Ship) -> ShipEntity {

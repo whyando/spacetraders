@@ -130,6 +130,62 @@ pub struct BuyShipResponse {
     pub transaction: ShipPurchaseTransaction,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterResponse {
+    pub agent: models::Agent,
+    pub contract: models::Contract,
+    pub faction: models::Faction,
+    pub ships: Vec<models::Ship>,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Yield {
+    pub symbol: String,
+    pub units: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractResponseYield {
+    pub ship_symbol: String,
+    #[serde(rename = "yield")]
+    pub _yield: Yield,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractResponse {
+    pub cargo: models::ShipCargo,
+    pub cooldown: models::ShipCooldown,
+    pub extraction: ExtractResponseYield,
+    pub events: Vec<models::ShipConditionEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SiphonResponse {
+    pub cargo: models::ShipCargo,
+    pub cooldown: models::ShipCooldown,
+    pub siphon: ExtractResponseYield,
+    pub events: Vec<models::ShipConditionEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JettisonResponse {
+    pub cargo: models::ShipCargo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferResponse {
+    pub cargo: models::ShipCargo,
+    pub target_cargo: models::ShipCargo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SurveyResponse {
+    pub cooldown: models::ShipCooldown,
+    pub surveys: Vec<models::Survey>,
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

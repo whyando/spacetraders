@@ -1,6 +1,7 @@
 use crate::agent_controller::Event;
 use crate::api_client::api_models::{
-    NavigateResponse, OrbitResponse, RefuelResponse, TradeResponse,
+    ExtractResponse, JettisonResponse, NavigateResponse, OrbitResponse, RefuelResponse,
+    SiphonResponse, SurveyResponse, TradeResponse,
 };
 use crate::models::{ShipCargoItem, ShipCooldown, Survey};
 use crate::ship_controller::ShipNavStatus::*;
@@ -317,11 +318,6 @@ impl ShipController {
     }
 
     pub async fn jettison_cargo(&self, good: &str, units: i64) {
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        struct JettisonResponse {
-            cargo: ShipCargo,
-        }
-
         assert!(!self.is_in_transit(), "Ship is in transit");
         self.debug(&format!("Jettisoning {} {}", units, good));
         let uri = format!("/my/ships/{}/jettison", self.ship_symbol);
@@ -613,12 +609,6 @@ impl ShipController {
     }
 
     pub async fn survey(&self) {
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        struct SurveyResponse {
-            cooldown: ShipCooldown,
-            surveys: Vec<Survey>,
-        }
-
         assert!(!self.is_in_transit());
         self.wait_for_cooldown().await;
         self.debug(&format!("Surveying {}", self.waypoint()));
@@ -672,13 +662,6 @@ impl ShipController {
     }
 
     pub async fn siphon(&self) {
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        struct SiphonResponse {
-            cargo: ShipCargo,
-            cooldown: ShipCooldown,
-            siphon: Value,
-            events: Vec<ShipConditionEvent>,
-        }
         assert!(!self.is_in_transit(), "Ship is in transit");
         self.orbit().await;
         self.wait_for_cooldown().await;
@@ -695,8 +678,8 @@ impl ShipController {
             .post::<Data<SiphonResponse>, _>(&uri, &body)
             .await
             .data;
-        let good = siphon["yield"]["symbol"].as_str().unwrap();
-        let units = siphon["yield"]["units"].as_i64().unwrap();
+        let good = siphon._yield.symbol;
+        let units = siphon._yield.units;
         self.handle_ship_condition_events(&events);
         self.debug(&format!("Siphoned {} units of {}", units, good));
         self.update_cooldown(cooldown);
@@ -710,26 +693,27 @@ impl ShipController {
         self.debug(&format!("Extracting survey {}", survey.uuid));
         let uri = format!("/my/ships/{}/extract/survey", self.ship_symbol);
         let req_body = &survey.survey;
-        // let mut response: Value = self.api_client.post(&uri, body).await;
 
-        let (code, resp_body): (StatusCode, Result<Value, String>) = self
+        let (code, resp_body): (StatusCode, Result<String, String>) = self
             .api_client
-            .request(Method::POST, &uri, Some(req_body))
+            .request_string(Method::POST, &uri, Some(req_body))
             .await;
         match code {
             StatusCode::CREATED => {
-                let mut response = resp_body.unwrap();
-                let cargo: ShipCargo =
-                    serde_json::from_value(response["data"]["cargo"].take()).unwrap();
-                let cooldown: ShipCooldown =
-                    serde_json::from_value(response["data"]["cooldown"].take()).unwrap();
-                let extraction: Value =
-                    serde_json::from_value(response["data"]["extraction"].take()).unwrap();
-                let events = serde_json::from_value(response["data"]["events"].take()).unwrap();
+                let response: String = resp_body.unwrap();
+                let ExtractResponse {
+                    cargo,
+                    cooldown,
+                    extraction,
+                    events,
+                } = serde_json::from_str::<Data<ExtractResponse>>(&response)
+                    .unwrap()
+                    .data;
                 self.handle_ship_condition_events(&events);
-                let good = extraction["yield"]["symbol"].as_str().unwrap();
-                let units = extraction["yield"]["units"].as_i64().unwrap();
-                self.debug(&format!("Extracted {} units of {}", units, good));
+                self.debug(&format!(
+                    "Extracted {} units of {}",
+                    extraction._yield.units, extraction._yield.symbol
+                ));
                 self.update_cooldown(cooldown);
                 self.update_cargo(cargo);
             }

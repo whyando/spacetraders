@@ -1,10 +1,11 @@
 pub mod api_models;
 pub mod interceptor;
 pub mod kafka_interceptor;
+pub mod routes;
 
 use self::interceptor::ApiInterceptor;
-use crate::config::CONFIG;
 use crate::models::*;
+use crate::{api_client::api_models::RegisterResponse, config::CONFIG};
 use core::panic;
 use log::*;
 use reqwest::{self, Method, StatusCode};
@@ -95,16 +96,6 @@ impl ApiClient {
             "faction": faction,
             "symbol": callsign,
         });
-
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        struct RegisterResponse {
-            agent: Agent,
-            contract: Contract,
-            faction: Faction,
-            ships: Vec<Ship>,
-            token: String,
-        }
-
         let body: Data<RegisterResponse> = self.post("/register", &req_body).await;
         body.data.token
     }
@@ -306,6 +297,67 @@ impl ApiClient {
         })
     }
 
+    pub async fn get_string(&self, path: &str) -> String {
+        let (status, body_result) = self.request_string(Method::GET, path, None::<&()>).await;
+        body_result.unwrap_or_else(|body| {
+            panic!(
+                "Request failed: {} {} {}\nbody: {}",
+                status.as_u16(),
+                Method::GET,
+                path,
+                body
+            )
+        })
+    }
+
+    pub async fn post_string<U>(&self, path: &str, json_body: &U) -> String
+    where
+        U: Serialize,
+    {
+        let (status, body_result) = self
+            .request_string(Method::POST, path, Some(json_body))
+            .await;
+        body_result.unwrap_or_else(|body| {
+            panic!(
+                "Request failed: {} {} {}\nbody: {}",
+                status.as_u16(),
+                Method::POST,
+                path,
+                body
+            )
+        })
+    }
+
+    pub async fn patch_string<U>(&self, path: &str, json_body: &U) -> String
+    where
+        U: Serialize,
+    {
+        let (status, body_result) = self
+            .request_string(Method::PATCH, path, Some(json_body))
+            .await;
+        body_result.unwrap_or_else(|body| {
+            panic!(
+                "Request failed: {} {} {}\nbody: {}",
+                status.as_u16(),
+                Method::PATCH,
+                path,
+                body
+            )
+        })
+    }
+
+    pub async fn request_string_with_status<U>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        json_body: Option<&U>,
+    ) -> (StatusCode, Result<String, String>)
+    where
+        U: Serialize,
+    {
+        self.request_string(method, path, json_body).await
+    }
+
     async fn wait_rate_limit(&self) {
         let now = Instant::now();
         let request_instant = {
@@ -337,6 +389,30 @@ impl ApiClient {
     ) -> (StatusCode, Result<T, String>)
     where
         T: serde::de::DeserializeOwned,
+        U: Serialize,
+    {
+        let (status, result) = self.request_string(method, path, json_body).await;
+        match result {
+            Ok(content) => {
+                let content: T = serde_json::from_str(&content)
+                    .map_err(|e| {
+                        error!("Unable to parse response as json: {}\nbody: {}", e, content);
+                        panic!("Deserialisation failed");
+                    })
+                    .unwrap();
+                (status, Ok(content))
+            }
+            Err(body) => (status, Err(body)),
+        }
+    }
+
+    pub async fn request_string<U>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        json_body: Option<&U>,
+    ) -> (StatusCode, Result<String, String>)
+    where
         U: Serialize,
     {
         self.wait_rate_limit().await;
@@ -384,16 +460,7 @@ impl ApiClient {
         }
 
         if status.is_success() {
-            let content: T = serde_json::from_str(&response_body)
-                .map_err(|e| {
-                    error!(
-                        "Unable to parse response as json: {}\nbody: {}",
-                        e, response_body
-                    );
-                    panic!("Deserialisation failed");
-                })
-                .unwrap();
-            (status, Ok(content))
+            (status, Ok(response_body))
         } else {
             (status, Err(response_body))
         }

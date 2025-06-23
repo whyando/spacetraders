@@ -1,6 +1,6 @@
 use super::join_handles::JoinHandles;
 use super::ledger::Ledger;
-use crate::api_client::api_models::{BuyShipResponse, WaypointDetailed};
+use crate::api_client::api_models::{BuyShipResponse, TransferResponse, WaypointDetailed};
 use crate::broker::{CargoBroker, TransferActor};
 use crate::config::CONFIG;
 use crate::models::{ShipNavStatus::*, *};
@@ -168,12 +168,6 @@ impl AgentController {
         good: String,
         units: i64,
     ) {
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct TransferResponse {
-            cargo: ShipCargo,
-            target_cargo: ShipCargo,
-        }
         debug!("agent_controller::transfer_cargo");
 
         self.debug(&format!(
