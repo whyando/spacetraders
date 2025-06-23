@@ -146,6 +146,7 @@ pub struct Yield {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExtractResponseYield {
     pub ship_symbol: String,
     #[serde(rename = "yield")]
@@ -184,6 +185,12 @@ pub struct TransferResponse {
 pub struct SurveyResponse {
     pub cooldown: models::ShipCooldown,
     pub surveys: Vec<models::Survey>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractActionResponse {
+    pub agent: models::Agent,
+    pub contract: models::Contract,
 }
 
 #[cfg(test)]

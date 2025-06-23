@@ -21,7 +21,7 @@ use st::scylla_client::Snapshot;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-const TEST_ID: &str = "14";
+const TEST_ID: &str = "15";
 
 #[tokio::main]
 async fn main() {
@@ -76,6 +76,11 @@ impl Worker {
         if req.slice_id != "whyando_0_5_20250622" {
             return;
         }
+        // Only process successful requests.
+        // Failed requests have more varied response formats, and usually don't result in state changes.
+        if !(req.status >= 200 && req.status < 300) {
+            return;
+        }
         info!(
             "Received api request: {} {} {} {} {}",
             req.request_id, req.slice_id, req.status, req.method, req.path
@@ -128,9 +133,9 @@ impl Worker {
                         serde_json::from_str(&req.response_body).unwrap();
                 }
                 Endpoint::PostContractAccept(_contract_id) => {
-                    // Contract data - no ship updates needed
-                    let _contract: Data<st::models::Contract> =
+                    let contract: Data<ContractActionResponse> =
                         serde_json::from_str(&req.response_body).unwrap();
+                    agent_updates.insert(contract.data.agent.symbol.clone(), contract.data.agent);
                 }
                 Endpoint::GetShip(ship_symbol) => {
                     let ship: Data<Ship> = serde_json::from_str(&req.response_body).unwrap();
@@ -161,6 +166,7 @@ impl Worker {
                     let resp: Data<RefuelResponse> =
                         serde_json::from_str(&req.response_body).unwrap();
                     ship_fuel_updates.insert(ship_symbol.clone(), resp.data.fuel);
+                    agent_updates.insert(resp.data.agent.symbol.clone(), resp.data.agent);
                     if let Some(cargo) = resp.data.cargo {
                         ship_cargo_updates.insert(ship_symbol.clone(), cargo);
                     }
@@ -209,13 +215,13 @@ impl Worker {
                         serde_json::from_str(&req.response_body).unwrap();
                 }
                 Endpoint::GetWaypointMarket(_system_symbol, _waypoint_symbol) => {
-                    // Universe data - no ship updates needed
-                    let _market: Data<st::models::Market> =
+                    // (Might be remote or local market)
+                    let _market: Data<st::models::MarketRemoteView> =
                         serde_json::from_str(&req.response_body).unwrap();
                 }
                 Endpoint::GetShipyard(_system_symbol, _waypoint_symbol) => {
-                    // Universe data - no ship updates needed
-                    let _shipyard: Data<st::models::Shipyard> =
+                    // (Might be remote or local shipyard)
+                    let _shipyard: Data<st::models::ShipyardRemoteView> =
                         serde_json::from_str(&req.response_body).unwrap();
                 }
                 Endpoint::GetWaypointConstruction(_system_symbol, _waypoint_symbol) => {
@@ -224,6 +230,8 @@ impl Worker {
                         serde_json::from_str(&req.response_body).unwrap();
                 }
             }
+        } else {
+            warn!("Endpoint not matched: {} {}", req.method, req.path);
         }
 
         if ship_updates.is_empty()

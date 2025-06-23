@@ -1,6 +1,8 @@
 use super::join_handles::JoinHandles;
 use super::ledger::Ledger;
-use crate::api_client::api_models::{BuyShipResponse, TransferResponse, WaypointDetailed};
+use crate::api_client::api_models::{
+    BuyShipResponse, ContractActionResponse, TransferResponse, WaypointDetailed,
+};
 use crate::broker::{CargoBroker, TransferActor};
 use crate::config::CONFIG;
 use crate::models::{ShipNavStatus::*, *};
@@ -203,12 +205,6 @@ impl AgentController {
     }
 
     async fn contract_inner(&self, path: &str) {
-        #[derive(Debug, Clone, Serialize, Deserialize)]
-        struct ContractActionResponse {
-            agent: Agent,
-            contract: Contract,
-        }
-
         let contract_id = self.get_current_contract_id().await.expect("no contract");
 
         self.debug(&format!("{} contract {}", path, contract_id));
