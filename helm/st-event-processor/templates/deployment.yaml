@@ -43,9 +43,9 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           env:
             - name: RUST_LOG
-              value: info,st=debug
+              value: info,st=debug,event_processor=debug,api_server=debug,main=debug,debug_view=debug
             - name: RUST_BACKTRACE
-              value: "0"
+              value: "1"
             {{- toYaml .Values.env | nindent 12 }}
           {{- with .Values.volumeMounts }}
           volumeMounts:
