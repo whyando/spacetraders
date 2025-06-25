@@ -25,7 +25,7 @@ use st::scylla_client::Snapshot;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-const TEST_ID: &str = "19";
+const TEST_ID: &str = "20";
 
 #[tokio::main]
 async fn main() {
@@ -541,7 +541,7 @@ impl Worker {
             seq_num: next_seq_num,
             timestamp: ts,
             entity_id: entity_id.to_string(),
-            event_type: "ship_update".to_string(),
+            event_type: entity_type.to_string(),
             event_data: event_data.to_string(),
         };
         self.scylla.insert_event(&event).await;
