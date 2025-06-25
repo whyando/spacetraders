@@ -1,11 +1,12 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ include "spacetraders.fullname" . }}
   labels:
     {{- include "spacetraders.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  serviceName: {{ include "spacetraders.fullname" . }}
   selector:
     matchLabels:
       {{- include "spacetraders.selectorLabels" . | nindent 6 }}
