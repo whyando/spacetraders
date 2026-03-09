@@ -4,20 +4,13 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 #[derive(Debug)]
+#[derive(Default)]
 struct ShipEntry {
     reserved_credits: i64,
     // trade_symbol -> (units, total_value)
     goods: BTreeMap<String, (i64, i64)>,
 }
 
-impl Default for ShipEntry {
-    fn default() -> Self {
-        ShipEntry {
-            reserved_credits: 0,
-            goods: BTreeMap::new(),
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct Ledger {

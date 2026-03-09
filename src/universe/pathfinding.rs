@@ -51,9 +51,9 @@ impl Universe {
             .collect::<Vec<_>>();
         let mut waypoints = BTreeMap::new();
         for (system, waypoint_symbol) in &jumpgates {
-            let waypoint = self.detailed_waypoint(&waypoint_symbol).await;
+            let waypoint = self.detailed_waypoint(waypoint_symbol).await;
             if !waypoint.is_uncharted() {
-                let _gate = self.get_jumpgate_connections(&waypoint_symbol).await;
+                let _gate = self.get_jumpgate_connections(waypoint_symbol).await;
             }
             waypoints.insert(waypoint_symbol, (system, waypoint));
         }
@@ -61,7 +61,7 @@ impl Universe {
         // Read connections from self.jumpgates (includes uncharted gates that we know the connections for)
         let mut graph: BTreeMap<WaypointSymbol, JumpGate> = BTreeMap::new();
         for (&waypoint_symbol, (_s, waypoint)) in waypoints.iter() {
-            let known_connections = self.jumpgates.contains_key(&waypoint_symbol);
+            let known_connections = self.jumpgates.contains_key(waypoint_symbol);
             let gate = JumpGate {
                 active_connections: vec![],
                 is_constructed: !waypoint.is_under_construction,
@@ -80,7 +80,7 @@ impl Universe {
                 if dst_waypoint.is_under_construction {
                     continue;
                 }
-                let distance = src_system.distance(&dst_system);
+                let distance = src_system.distance(dst_system);
                 let cooldown = 60 + distance;
 
                 // src -> dst

@@ -37,7 +37,7 @@ async fn get_jump_gate(ship: &ShipController) -> WaypointSymbol {
     let system = ship.agent_controller.starting_system();
     let waypoints = ship
         .universe
-        .search_waypoints(&system, &vec![WaypointFilter::JumpGate])
+        .search_waypoints(&system, &[WaypointFilter::JumpGate])
         .await;
     assert_eq!(waypoints.len(), 1,);
     waypoints[0].symbol.clone()
@@ -102,7 +102,7 @@ async fn tick(
 ) -> Option<ConstructionHaulerState> {
     match state {
         Buying => {
-            let construction = ship.universe.get_construction(&jump_gate_symbol).await;
+            let construction = ship.universe.get_construction(jump_gate_symbol).await;
             let construction: &Construction = match &construction.data {
                 None => return Some(Completed),
                 Some(x) if x.is_complete => return Some(Completed),
@@ -132,7 +132,7 @@ async fn tick(
                     "ADVANCED_CIRCUITRY" => 1_000_000,
                     _ => panic!("Unknown construction good: {}", mat.trade_symbol),
                 };
-                let market = ship.universe.get_market(&market_symbol);
+                let market = ship.universe.get_market(market_symbol);
                 if let Some(market) = market {
                     let good = market
                         .data
@@ -151,7 +151,7 @@ async fn tick(
                             good.trade_volume,
                             min(ship.cargo_space_available(), required_units),
                         );
-                        ship.goto_waypoint(&market_symbol).await;
+                        ship.goto_waypoint(market_symbol).await;
 
                         let expected_cost = good.purchase_price * units;
                         let credits = ship.agent_controller.ledger.available_credits();
@@ -177,19 +177,19 @@ async fn tick(
             // Nothing to buy right now: reposition ship
             if ship.waypoint() != *fab_mat_market && ship.waypoint() != *adv_circuit_market {
                 ship.debug("Repositioning to FAB_MAT market");
-                ship.goto_waypoint(&fab_mat_market).await;
+                ship.goto_waypoint(fab_mat_market).await;
                 return None;
             }
 
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-            return None;
+            None
         }
         Delivering => {
             if ship.cargo_empty() {
                 return Some(Buying);
             }
             // todo - handle case where materials are no longer needed
-            ship.goto_waypoint(&jump_gate_symbol).await;
+            ship.goto_waypoint(jump_gate_symbol).await;
             while let Some(cargo_item) = ship.cargo_first_item() {
                 ship.supply_construction(&cargo_item.symbol, cargo_item.units)
                     .await;
@@ -218,7 +218,7 @@ async fn tick(
             // ship.debug(
             //     "Jumpgate is completed + navigating to shipyard complete. Entering terminal state.",
             // );
-            return Some(TerminalState);
+            Some(TerminalState)
         }
         TerminalState => {
             panic!("Invalid state");

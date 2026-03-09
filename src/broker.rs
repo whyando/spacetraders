@@ -35,10 +35,12 @@ pub struct CargoBroker {
     inner: Arc<Mutex<CargoBrokerInner>>,
 }
 
+type SenderEntry = (String, Vec<(String, i64)>, oneshot::Sender<()>);
+
 struct CargoBrokerInner {
     rx: mpsc::Receiver<Message>,
     receivers: BTreeMap<WaypointSymbol, VecDeque<(String, i64, oneshot::Sender<()>)>>,
-    senders: BTreeMap<WaypointSymbol, VecDeque<(String, Vec<(String, i64)>, oneshot::Sender<()>)>>,
+    senders: BTreeMap<WaypointSymbol, VecDeque<SenderEntry>>,
 }
 
 impl Default for CargoBroker {
@@ -100,12 +102,12 @@ impl CargoBroker {
 
     pub async fn run(&self, agent_controller: Box<dyn TransferActor + Sync + Send>) {
         let mut inner = self.inner.lock().await;
-        inner.run(&agent_controller).await;
+        inner.run(&*agent_controller).await;
     }
 }
 
 impl CargoBrokerInner {
-    async fn run(&mut self, actor: &Box<dyn TransferActor + Sync + Send>) {
+    async fn run(&mut self, actor: &(dyn TransferActor + Sync + Send)) {
         while let Some(cmd) = self.rx.recv().await {
             // debug!("cargo_broker rcv: {:?}", cmd);
             match cmd {
@@ -129,7 +131,7 @@ impl CargoBrokerInner {
 
     async fn try_transfer(
         &mut self,
-        actor: &Box<dyn TransferActor + Send + Sync>,
+        actor: &(dyn TransferActor + Send + Sync),
         waypoint: &WaypointSymbol,
     ) {
         // we could improve the algorithm here to do fancy balancing stuff, or early release for senders

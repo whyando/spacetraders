@@ -70,7 +70,7 @@ async fn tick(ship: &ShipController, state: &ExplorerState) -> Option<ExplorerSt
             // Could be existing reservation, or a new one
             let target = ship
                 .agent_controller
-                .get_explorer_reservation(&ship.symbol(), &&ship.system())
+                .get_explorer_reservation(&ship.symbol(), &ship.system())
                 .await;
             let desc = match &target {
                 Some(target) => format!("Navigating to {}", target),
@@ -132,8 +132,8 @@ async fn tick(ship: &ShipController, state: &ExplorerState) -> Option<ExplorerSt
                 let edge = &graph[s][t];
                 match edge.edge_type {
                     EdgeType::Jumpgate => {
-                        let src_gate = ship.universe.get_jumpgate(&s).await;
-                        let dst_gate = ship.universe.get_jumpgate(&t).await;
+                        let src_gate = ship.universe.get_jumpgate(s).await;
+                        let dst_gate = ship.universe.get_jumpgate(t).await;
                         ship.goto_waypoint(&src_gate).await;
                         ship.jump(&dst_gate).await;
                     }
@@ -155,9 +155,9 @@ async fn tick(ship: &ShipController, state: &ExplorerState) -> Option<ExplorerSt
                         // target waypoint:
                         // if jumpgate in target system: warp to jumpgate
                         // otherwise: warp to any waypoint in target system
-                        let warp_target = match ship.universe.get_jumpgate_opt(&t).await {
+                        let warp_target = match ship.universe.get_jumpgate_opt(t).await {
                             Some(jumpgate) => jumpgate,
-                            None => ship.universe.first_waypoint(&t).await,
+                            None => ship.universe.first_waypoint(t).await,
                         };
                         ship.warp(ShipFlightMode::Cruise, &warp_target).await;
                     }

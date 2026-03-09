@@ -22,6 +22,12 @@ pub struct JoinHandles {
     tx: mpsc::UnboundedSender<(String, JoinHandle<()>)>,
     hdl: Arc<tokio::sync::Mutex<JoinHandle<()>>>,
 }
+impl Default for JoinHandles {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JoinHandles {
     pub fn new() -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<(String, JoinHandle<()>)>();

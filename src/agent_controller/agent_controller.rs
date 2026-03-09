@@ -35,7 +35,7 @@ use tokio::time::MissedTickBehavior;
 
 #[derive(Clone, Debug)]
 pub enum Event {
-    ShipUpdate(Ship),
+    ShipUpdate(Box<Ship>),
     AgentUpdate(Agent),
 }
 
@@ -132,7 +132,7 @@ impl AgentController {
         self.agent.lock().unwrap().clone()
     }
     pub fn state(&self) -> AgentState {
-        self.state.lock().unwrap().clone()
+        *self.state.lock().unwrap()
     }
     pub fn ships(&self) -> Vec<(String, Ship, String, String)> {
         // self.ships
@@ -199,8 +199,8 @@ impl AgentController {
             dest_ship.cargo = target_cargo;
             (src_ship.clone(), dest_ship.clone())
         };
-        self.emit_event(&Event::ShipUpdate(src_ship));
-        self.emit_event(&Event::ShipUpdate(dest_ship));
+        self.emit_event(&Event::ShipUpdate(Box::new(src_ship)));
+        self.emit_event(&Event::ShipUpdate(Box::new(dest_ship)));
         debug!("agent_controller::transfer_cargo done");
     }
 
@@ -287,8 +287,8 @@ impl AgentController {
                 (v.clone(), k.clone())
             })
             .collect();
-        let probe_jumpgate_reservations = db.get_probe_jumpgate_reservations(&callsign).await;
-        let explorer_reservations = db.get_explorer_reservations(&callsign).await;
+        let probe_jumpgate_reservations = db.get_probe_jumpgate_reservations(callsign).await;
+        let explorer_reservations = db.get_explorer_reservations(callsign).await;
         let task_manager = LogisticTaskManager::new(universe, db, &system_symbol).await;
         let survey_manager = SurveyManager::new(db).await;
 
@@ -382,7 +382,7 @@ impl AgentController {
         let state = {
             let mut state = self.state.lock().unwrap();
             state.era = era;
-            state.clone()
+            *state
         };
         self.db
             .set_value(&format!("{}/state", self.callsign), &state)
@@ -443,12 +443,11 @@ impl AgentController {
         ship_config
             .iter()
             .filter_map(|job| {
-                if let ShipBehaviour::Probe(config) = &job.behaviour {
-                    if let Some(assignment) = self.job_assignments.get(&job.id) {
+                if let ShipBehaviour::Probe(config) = &job.behaviour
+                    && let Some(assignment) = self.job_assignments.get(&job.id) {
                         let ship_symbol = assignment.value().clone();
                         return Some((ship_symbol, config.waypoints.clone()));
                     }
-                }
                 None
             })
             .collect()
@@ -476,8 +475,8 @@ impl AgentController {
                             return Some((ship.symbol.clone(), waypoint_symbol.clone()));
                         }
                     }
-                } else if let ShipBehaviour::ConstructionHauler = &job.behaviour {
-                    if let Some(assignment) = self.job_assignments.get(&job.id) {
+                } else if let ShipBehaviour::ConstructionHauler = &job.behaviour
+                    && let Some(assignment) = self.job_assignments.get(&job.id) {
                         // Construction Hauler ship terminates at a shipyard so it can be used to buy ships
                         let ship = self.ships.get(assignment.value()).unwrap();
                         let ship = ship.lock().unwrap();
@@ -486,7 +485,6 @@ impl AgentController {
                             return Some((ship.symbol.clone(), ship.nav.waypoint_symbol.clone()));
                         }
                     }
-                }
                 None
             })
             .collect()
@@ -505,7 +503,7 @@ impl AgentController {
             transaction,
         } = self
             .api_client
-            .post::<Data<BuyShipResponse>, _>(&uri, &body)
+            .post::<Data<BuyShipResponse>, _>(uri, &body)
             .await
             .data;
         let ship_symbol = ship.symbol.clone();
@@ -530,7 +528,7 @@ impl AgentController {
         self.job_assignments.contains_key(job_id)
     }
 
-    async fn try_buy_ships_lock(&self) -> tokio::sync::MutexGuard<()> {
+    async fn try_buy_ships_lock(&self) -> tokio::sync::MutexGuard<'_, ()> {
         match self.try_buy_ships_mutex_guard.try_lock() {
             Ok(guard) => guard,
             Err(_e) => {
@@ -572,7 +570,7 @@ impl AgentController {
             .await;
         shipyards.sort_by_key(|x| x.1);
 
-        if shipyards.len() == 0 {
+        if shipyards.is_empty() {
             return BuyShipResult::FailedNoShipyards;
         }
         let job_credit_reservation = match &job.behaviour {
@@ -655,7 +653,7 @@ impl AgentController {
 
         let ship_config = self.get_ship_config();
         for job in ship_config.iter().filter(|job| !self.job_assigned(&job.id)) {
-            let result = self.try_buy_ship(&purchaser, &job).await;
+            let result = self.try_buy_ship(&purchaser, job).await;
             match result {
                 BuyShipResult::Bought(ship_symbol) => {
                     purchased_ships.push(ship_symbol);
@@ -722,10 +720,7 @@ impl AgentController {
 
         let mut ships = vec![];
         let use_nonstatic_probes = true;
-        let incl_outer_probes_and_siphons = match era {
-            AgentEra::StartingSystem1 => false,
-            _ => true,
-        };
+        let incl_outer_probes_and_siphons = !matches!(era, AgentEra::StartingSystem1);
         if CONFIG.no_gate_mode {
             panic!("No gate mode not supported");
             // return ship_config_no_gate(
@@ -766,7 +761,7 @@ impl AgentController {
         let jump_gate_symbol = {
             let waypoints = self
                 .universe
-                .search_waypoints(&self.starting_system(), &vec![WaypointFilter::JumpGate])
+                .search_waypoints(&self.starting_system(), &[WaypointFilter::JumpGate])
                 .await;
             assert!(waypoints.len() == 1);
             waypoints[0].symbol.clone()
@@ -937,7 +932,7 @@ impl AgentController {
     }
 
     // Wrapper to allow for async fn recursion
-    pub fn spawn_run_ship(&self, ship_symbol: String) -> BoxFuture<()> {
+    pub fn spawn_run_ship(&self, ship_symbol: String) -> BoxFuture<'_, ()> {
         Box::pin(self._spawn_run_ship(ship_symbol))
     }
 
@@ -1109,7 +1104,7 @@ impl AgentController {
     pub async fn clear_probe_jumpgate_reservation(&self, ship_symbol: &str) {
         {
             let target = self.probe_jumpgate_reservations.get(ship_symbol).unwrap();
-            assert_eq!(self.universe.connections_known(target.value()), true);
+            assert!(self.universe.connections_known(target.value()));
         }
         self.probe_jumpgate_reservations.remove(ship_symbol);
         self.db

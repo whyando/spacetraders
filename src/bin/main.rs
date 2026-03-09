@@ -44,8 +44,8 @@ async fn main() {
     // Generate a slice ID to be used as postgres schema name
     let slice_id = {
         let pg_schema = std::env::var("POSTGRES_SCHEMA").expect("POSTGRES_SCHEMA must be set");
-        let slice_id = pg_schema.replace("{RESET_DATE}", &status.reset_date.replace("-", ""));
-        slice_id
+        
+        pg_schema.replace("{RESET_DATE}", &status.reset_date.replace("-", ""))
     };
     // Use the reset date on the status response as a unique identifier to partition data between resets
     let db = DbClient::new(&slice_id).await;

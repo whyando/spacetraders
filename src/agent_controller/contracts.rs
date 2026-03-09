@@ -74,9 +74,9 @@ impl AgentController {
                         // First check if there is a non-import trade for this good
                         let non_import_trade_exists =
                             markets.iter().any(|(market_remote, _market_opt)| {
-                                if market_remote.exports.iter().any(|g| g.symbol == *good) {
-                                    return true;
-                                } else if market_remote.exchange.iter().any(|g| g.symbol == *good) {
+                                if market_remote.exports.iter().any(|g| g.symbol == *good)
+                                    || market_remote.exchange.iter().any(|g| g.symbol == *good)
+                                {
                                     return true;
                                 }
                                 false

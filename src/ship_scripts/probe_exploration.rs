@@ -69,13 +69,13 @@ async fn tick(ship: &ShipController, state: &ExplorerState) -> Option<ExplorerSt
             // Execute route
             ship.goto_waypoint(&start_jumpgate).await;
             for gate in path.iter().skip(1) {
-                ship.jump(&gate).await;
+                ship.jump(gate).await;
             }
             // Get connections
             assert_eq!(ship.waypoint(), *target_jumpgate);
             let _connections = ship
                 .universe
-                .get_jumpgate_connections(&target_jumpgate)
+                .get_jumpgate_connections(target_jumpgate)
                 .await;
 
             ship.agent_controller

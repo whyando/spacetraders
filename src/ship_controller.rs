@@ -90,7 +90,7 @@ impl ShipController {
     }
     pub fn emit_ship(&self) {
         let ship = self.ship();
-        self.agent_controller.emit_event(&Event::ShipUpdate(ship));
+        self.agent_controller.emit_event(&Event::ShipUpdate(Box::new(ship)));
     }
     pub fn update_nav_status(&self, status: ShipNavStatus) {
         {
@@ -728,14 +728,14 @@ impl ShipController {
                     );
                     self.agent_controller
                         .survey_manager
-                        .remove_survey(&survey)
+                        .remove_survey(survey)
                         .await;
                 } else if code == 4224 {
                     // Request failed: 409 Err("{\"error\":{\"message\":\"Ship extract failed. Survey X1-FM95-CD5Z-BEC3E1 has been exhausted.\",\"code\":4224}}")
                     self.debug("Extraction failed: Survey has been exhausted");
                     self.agent_controller
                         .survey_manager
-                        .remove_survey(&survey)
+                        .remove_survey(survey)
                         .await;
                 } else {
                     panic!(

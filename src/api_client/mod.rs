@@ -20,6 +20,12 @@ pub struct ApiClient {
     next_request_ts: Arc<Mutex<Option<Instant>>>,
 }
 
+impl Default for ApiClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ApiClient {
     pub fn new() -> ApiClient {
         let user_agent = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
@@ -220,7 +226,6 @@ impl ApiClient {
 }
 
 /// Private methods
-
 impl ApiClient {
     pub async fn get<T>(&self, path: &str) -> T
     where

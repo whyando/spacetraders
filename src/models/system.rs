@@ -37,11 +37,10 @@ impl System {
 
 impl Waypoint {
     pub fn is_market(&self) -> bool {
-        if let Some(details) = &self.details {
-            if details.is_market {
+        if let Some(details) = &self.details
+            && details.is_market {
                 return true;
             }
-        }
         // All jumpgates are also markets
         if self.waypoint_type == "JUMP_GATE" {
             return true;

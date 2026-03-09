@@ -31,7 +31,7 @@ impl SurveyManager {
     }
 
     pub async fn insert_surveys(&self, surveys: Vec<Survey>) {
-        let surveys = surveys
+        let surveys: Vec<KeyedSurvey> = surveys
             .into_iter()
             .map(|survey| KeyedSurvey {
                 uuid: uuid::Uuid::new_v4(),
@@ -44,7 +44,7 @@ impl SurveyManager {
             inner
                 .surveys
                 .entry(survey.survey.symbol.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(survey);
         }
     }

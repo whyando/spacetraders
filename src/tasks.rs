@@ -20,22 +20,21 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, RwLock};
 
 fn is_task_allowed(task: &Task, config: &LogisticsScriptConfig) -> bool {
-    if let TaskActions::TransportCargo { dest_action, .. } = &task.actions {
-        if let Action::DeliverContract(_, _) = dest_action {
+    if let TaskActions::TransportCargo { dest_action, .. } = &task.actions
+        && let Action::DeliverContract(_, _) = dest_action {
             // Allow contract delivery to bypass the normal waypoint allowlist
             return true;
         }
-    }
 
     if let Some(waypoint_allowlist) = &config.waypoint_allowlist {
         match &task.actions {
             TaskActions::VisitLocation { waypoint, .. } => {
-                if !waypoint_allowlist.contains(&waypoint) {
+                if !waypoint_allowlist.contains(waypoint) {
                     return false;
                 }
             }
             TaskActions::TransportCargo { src, dest, .. } => {
-                if !waypoint_allowlist.contains(&src) || !waypoint_allowlist.contains(&dest) {
+                if !waypoint_allowlist.contains(src) || !waypoint_allowlist.contains(dest) {
                     return false;
                 }
             }
@@ -144,7 +143,7 @@ impl LogisticTaskManager {
     ) -> Vec<Task> {
         let now = chrono::Utc::now();
         let waypoints: Vec<WaypointDetailed> =
-            self.universe.get_system_waypoints(&system_symbol).await;
+            self.universe.get_system_waypoints(system_symbol).await;
 
         let mut tasks = Vec::new();
         let system_prefix = format!("{}/", system_symbol);
@@ -162,8 +161,8 @@ impl LogisticTaskManager {
             debug!("Task controller bought ship {}", ship_symbol);
             self.agent_controller().spawn_run_ship(ship_symbol).await;
         }
-        if let Some(waypoint) = shipyard_task_waypoint {
-            if waypoint.system() == *system_symbol {
+        if let Some(waypoint) = shipyard_task_waypoint
+            && waypoint.system() == *system_symbol {
                 tasks.push(Task {
                     id: format!("{}buyships_{}", system_prefix, waypoint),
                     actions: TaskActions::VisitLocation {
@@ -173,7 +172,6 @@ impl LogisticTaskManager {
                     value: 200000,
                 });
             }
-        }
 
         // Contract tasks
         let contract = match self.agent_controller().contract_tick(false).await {
@@ -187,8 +185,8 @@ impl LogisticTaskManager {
             .map(|(_, _, trade, _)| trade.symbol.clone());
 
         // load markets
-        let markets = self.universe.get_system_markets(&system_symbol).await;
-        let shipyards = self.universe.get_system_shipyards(&system_symbol).await;
+        let markets = self.universe.get_system_markets(system_symbol).await;
+        let shipyards = self.universe.get_system_shipyards(system_symbol).await;
 
         // unique list of goods
         let mut goods = BTreeSet::new();
@@ -228,7 +226,7 @@ impl LogisticTaskManager {
             let fab_mat_markets = self
                 .universe
                 .search_waypoints(
-                    &system_symbol,
+                    system_symbol,
                     &[
                         WaypointFilter::Imports("QUARTZ_SAND".to_string()),
                         WaypointFilter::Imports("IRON".to_string()),
@@ -236,11 +234,11 @@ impl LogisticTaskManager {
                     ],
                 )
                 .await;
-            assert!(fab_mat_markets.len() >= 1);
+            assert!(!fab_mat_markets.is_empty());
             let smeltery_markets = self
                 .universe
                 .search_waypoints(
-                    &system_symbol,
+                    system_symbol,
                     &[
                         WaypointFilter::Imports("IRON_ORE".to_string()),
                         WaypointFilter::Imports("COPPER_ORE".to_string()),
@@ -249,11 +247,11 @@ impl LogisticTaskManager {
                     ],
                 )
                 .await;
-            assert!(smeltery_markets.len() >= 1);
+            assert!(!smeltery_markets.is_empty());
             let adv_circuit_markets = self
                 .universe
                 .search_waypoints(
-                    &system_symbol,
+                    system_symbol,
                     &[
                         WaypointFilter::Imports("ELECTRONICS".to_string()),
                         WaypointFilter::Imports("MICROPROCESSORS".to_string()),
@@ -261,12 +259,12 @@ impl LogisticTaskManager {
                     ],
                 )
                 .await;
-            assert!(adv_circuit_markets.len() >= 1);
+            assert!(!adv_circuit_markets.is_empty());
 
             let electronics_markets = self
                 .universe
                 .search_waypoints(
-                    &system_symbol,
+                    system_symbol,
                     &[
                         WaypointFilter::Imports("SILICON_CRYSTALS".to_string()),
                         WaypointFilter::Imports("COPPER".to_string()),
@@ -274,11 +272,11 @@ impl LogisticTaskManager {
                     ],
                 )
                 .await;
-            assert!(electronics_markets.len() >= 1);
+            assert!(!electronics_markets.is_empty());
             let microprocessor_markets = self
                 .universe
                 .search_waypoints(
-                    &system_symbol,
+                    system_symbol,
                     &[
                         WaypointFilter::Imports("SILICON_CRYSTALS".to_string()),
                         WaypointFilter::Imports("COPPER".to_string()),
@@ -286,7 +284,7 @@ impl LogisticTaskManager {
                     ],
                 )
                 .await;
-            assert!(microprocessor_markets.len() >= 1);
+            assert!(!microprocessor_markets.is_empty());
 
             let fab_mats = construction
                 .materials
@@ -510,7 +508,7 @@ impl LogisticTaskManager {
                     Exchange => true,
                 })
                 .filter(|(market, _)| match good_import_permits.get(good.as_str()) {
-                    Some(allowlist) => allowlist.contains(&market),
+                    Some(allowlist) => allowlist.contains(market),
                     None => true,
                 })
                 .max_by_key(|(_, trade)| trade.sell_price);
@@ -583,7 +581,7 @@ impl LogisticTaskManager {
         tasks
     }
 
-    async fn take_tasks_lock(&self) -> tokio::sync::MutexGuard<()> {
+    async fn take_tasks_lock(&self) -> tokio::sync::MutexGuard<'_, ()> {
         match self.take_tasks_mutex_guard.try_lock() {
             Ok(guard) => guard,
             Err(_e) => {
@@ -633,7 +631,7 @@ impl LogisticTaskManager {
         let state = self.state.read().unwrap();
         let ship_tasks = state.ship_tasks.get(ship_symbol);
         assert!(
-            ship_tasks.map_or(true, |queue| queue.is_empty()),
+            ship_tasks.is_none_or(|queue| queue.is_empty()),
             "Ship {} already has scheduled tasks",
             ship_symbol
         );
@@ -683,7 +681,7 @@ impl LogisticTaskManager {
                     .in_progress_tasks
                     .contains_key(&task.id)
             })
-            .filter(|task| is_task_allowed(&task, &config))
+            .filter(|task| is_task_allowed(task, config))
             .collect::<Vec<_>>();
 
         if available_tasks.is_empty() {
@@ -693,7 +691,7 @@ impl LogisticTaskManager {
         // Run planner
         let market_waypoints = self
             .universe
-            .get_system_waypoints(&system_symbol)
+            .get_system_waypoints(system_symbol)
             .await
             .into_iter()
             .filter(|w| w.is_market())
@@ -727,7 +725,7 @@ impl LogisticTaskManager {
                 }
             };
             let contraints = PlannerConstraints {
-                plan_length: plan_length.num_seconds() as i64,
+                plan_length: plan_length.num_seconds(),
                 max_compute_time: Duration::try_seconds(5).unwrap(),
             };
             let available_tasks_clone = available_tasks.clone();
@@ -764,7 +762,7 @@ impl LogisticTaskManager {
         info!("Planner returned {} actions", actions.len());
 
         // If 0 tasks were assigned, instead force assign the highest value task
-        if actions.len() == 0 {
+        if actions.is_empty() {
             let mut highest_value_task = None;
             let mut highest_value = 0;
             for task in &available_tasks {

@@ -22,7 +22,7 @@ pub async fn run(ship_controller: ShipController, config: &ProbeScriptConfig) {
 // - uses extra api requests to move between waypoints
 // Additionally, cannot be used to buy ships
 pub async fn probe_multiple_locations(ship: ShipController, config: &ProbeScriptConfig) {
-    assert_eq!(config.refresh_market, true);
+    assert!(config.refresh_market);
 
     let waypoint_symbols = config
         .waypoints

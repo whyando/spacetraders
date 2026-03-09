@@ -55,7 +55,8 @@ impl<'a> Planner<'a> {
                             completes_task: true,
                         },
                     );
-                    let job = SingleBuilder::default()
+                    
+                    SingleBuilder::default()
                         .id(&job_id)
                         .location(self.waypoint_index(waypoint))
                         .unwrap()
@@ -65,8 +66,7 @@ impl<'a> Planner<'a> {
                             dimens.set_job_value(task.value as f64);
                         })
                         .build_as_job()
-                        .unwrap();
-                    job
+                        .unwrap()
                 }
                 TaskActions::TransportCargo {
                     src,
@@ -239,7 +239,8 @@ pub fn run_planner(
 
     let solution = Solver::new(problem.clone(), config).solve().unwrap();
 
-    let ship_schedules = ships
+    
+    ships
         .iter()
         .map(|ship| {
             let route = solution
@@ -279,8 +280,7 @@ pub fn run_planner(
                 actions,
             }
         })
-        .collect();
-    ship_schedules
+        .collect()
 }
 
 #[cfg(test)]

@@ -75,7 +75,7 @@ impl DbClient {
             info!("Successfully connected to database");
         }
         let db = DbClient { db };
-        db.create_schema(&slice_id).await;
+        db.create_schema(slice_id).await;
         db
     }
 
@@ -239,7 +239,6 @@ impl DbClient {
     }
 
     pub async fn insert_market_trades(&self, _market: &WithTimestamp<Market>) {
-        return;
         // let inserts = market
         //     .data
         //     .trade_goods
@@ -427,7 +426,7 @@ impl DbClient {
         self.set_value("factions", factions).await
     }
 
-    pub async fn insert_surveys(&self, surveys: &Vec<KeyedSurvey>) {
+    pub async fn insert_surveys(&self, surveys: &[KeyedSurvey]) {
         let now = Utc::now();
         let inserts = surveys
             .iter()

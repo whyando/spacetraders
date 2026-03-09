@@ -49,7 +49,7 @@ async fn sell_location(ship: &ShipController, cargo_symbol: &str) -> Option<Wayp
 async fn engineered_asteroid_location(ship: &ShipController) -> WaypointSymbol {
     let waypoints = ship
         .universe
-        .search_waypoints(&ship.system(), &vec![WaypointFilter::EngineeredAsteroid])
+        .search_waypoints(&ship.system(), &[WaypointFilter::EngineeredAsteroid])
         .await;
     assert!(waypoints.len() == 1);
     waypoints[0].symbol.clone()

@@ -248,7 +248,7 @@ impl Universe {
             .iter()
             .map(|w| db_models::NewWaypoint {
                 symbol: w.symbol.as_str(),
-                system_id: system_id,
+                system_id,
                 type_: &w.waypoint_type,
                 x: w.x as i32,
                 y: w.y as i32,
@@ -314,7 +314,7 @@ impl Universe {
                         waypoint_type: w.waypoint_type.clone(),
                         x: w.x,
                         y: w.y,
-                        traits: traits,
+                        traits,
                         is_under_construction: details.is_under_construction,
                         orbitals: vec![],
                         orbits: None,
@@ -338,7 +338,7 @@ impl Universe {
                         let db_waypoint = system
                             .waypoints
                             .iter()
-                            .find(|w| &w.symbol == &waypoint.symbol)
+                            .find(|w| w.symbol == waypoint.symbol)
                             .expect("Waypoint not found");
                         NewWaypointDetails {
                             waypoint_id: db_waypoint.id,
@@ -363,7 +363,7 @@ impl Universe {
                 for w in s.waypoints.iter_mut() {
                     let waypoint = waypoints
                         .iter()
-                        .find(|w2| &w2.symbol == &w.symbol)
+                        .find(|w2| w2.symbol == w.symbol)
                         .expect("Waypoint not found");
                     w.details = Some(WaypointDetails {
                         is_market: waypoint.is_market(),
@@ -480,8 +480,8 @@ impl Universe {
             if !waypoint.is_shipyard() {
                 continue;
             }
-            if let Some(shipyard) = self.get_shipyard(&waypoint.symbol) {
-                if let Some(ship) = shipyard
+            if let Some(shipyard) = self.get_shipyard(&waypoint.symbol)
+                && let Some(ship) = shipyard
                     .data
                     .ships
                     .iter()
@@ -489,7 +489,6 @@ impl Universe {
                 {
                     shipyards.push((waypoint.symbol.clone(), ship.purchase_price));
                 }
-            }
         }
         shipyards
     }
@@ -581,7 +580,7 @@ impl Universe {
     }
 
     pub async fn first_waypoint(&self, symbol: &SystemSymbol) -> WaypointSymbol {
-        self.get_system_waypoints(&symbol).await[0].symbol.clone()
+        self.get_system_waypoints(symbol).await[0].symbol.clone()
     }
 
     // Get jumpgate connections for a charted system
@@ -624,9 +623,9 @@ impl Universe {
     // Returns a matrix between market waypoints. Assumes we can refuel at any waypoint.
     // Weights are the travel duration in seconds between two waypoints
     // Preferring BURN flight mode, and only CRUISE if the fuel capacity isn't high enough
-    pub async fn market_adjacency_edges<'a>(
+    pub async fn market_adjacency_edges(
         &self,
-        market_waypoints: &'a [WaypointDetailed],
+        market_waypoints: &[WaypointDetailed],
         ship_max_fuel: i64,
         ship_speed: i64,
     ) -> Vec<BTreeMap<usize, NavEdge>> {

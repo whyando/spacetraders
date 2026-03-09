@@ -1,3 +1,4 @@
+#[allow(clippy::module_inception)]
 mod agent_controller;
 mod contracts;
 pub use contracts::ContractStatus;
