@@ -132,6 +132,7 @@ impl std::fmt::Debug for AgentEntityUpdate {
 pub struct SystemEntity {
     pub symbol: String,
     pub sector_symbol: String,
+    #[serde(rename = "type")]
     pub type_: String,
     pub x: i64,
     pub y: i64,
@@ -156,6 +157,7 @@ pub struct SystemEntityUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sector_symbol: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type")]
     pub type_: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x: Option<i64>,
