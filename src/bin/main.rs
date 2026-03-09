@@ -2,7 +2,6 @@ use log::*;
 use reqwest::StatusCode;
 use st::agent_controller::AgentController;
 use st::api_client::ApiClient;
-use st::api_client::kafka_interceptor::KafkaInterceptor;
 use st::config::CONFIG;
 use st::database::DbClient;
 use st::models::Faction;
@@ -23,8 +22,7 @@ async fn main() {
     info!("Starting agent {} for faction {}", callsign, faction);
     info!("Loaded config: {:?}", *CONFIG);
 
-    let kafka_interceptor = Arc::new(KafkaInterceptor::new().await);
-    let api_client = ApiClient::new(vec![kafka_interceptor.clone()]);
+    let api_client = ApiClient::new();
 
     let status = loop {
         let (status_code, status) = api_client.status().await;
@@ -49,8 +47,6 @@ async fn main() {
         let slice_id = pg_schema.replace("{RESET_DATE}", &status.reset_date.replace("-", ""));
         slice_id
     };
-    api_client.set_slice_id(&slice_id);
-
     // Use the reset date on the status response as a unique identifier to partition data between resets
     let db = DbClient::new(&slice_id).await;
 
@@ -83,13 +79,6 @@ async fn main() {
     log::info!("Setting token {}", agent_token);
     api_client.set_agent_token(&agent_token);
 
-    let agent_hdl = tokio::spawn(async move {
-        let agent_controller = AgentController::new(&api_client, &db, &universe, &callsign).await;
-        agent_controller.run().await;
-    });
-    let kafka_interceptor_hdl = tokio::spawn(async move {
-        kafka_interceptor.join().await;
-    });
-
-    tokio::try_join!(kafka_interceptor_hdl, agent_hdl).unwrap();
+    let agent_controller = AgentController::new(&api_client, &db, &universe, &callsign).await;
+    agent_controller.run().await;
 }

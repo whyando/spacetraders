@@ -4,12 +4,10 @@ pub mod schema;
 pub mod agent_controller;
 pub mod api_client;
 pub mod database;
-pub mod scylla_client;
 pub mod universe;
 
 pub mod broker;
 pub mod config;
-pub mod event_log;
 pub mod logistics_planner;
 pub mod pathfinding;
 pub mod prelude;

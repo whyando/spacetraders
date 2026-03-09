@@ -1,9 +1,5 @@
 pub mod api_models;
-pub mod interceptor;
-pub mod kafka_interceptor;
-pub mod routes;
 
-use self::interceptor::ApiInterceptor;
 use crate::models::*;
 use crate::{api_client::api_models::RegisterResponse, config::CONFIG};
 use core::panic;
@@ -11,10 +7,7 @@ use log::*;
 use reqwest::{self, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::{
-    Arc, Mutex, RwLock,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::time::Instant;
 
 const API_MAX_PAGE_SIZE: usize = 20;
@@ -23,15 +16,12 @@ const API_MAX_PAGE_SIZE: usize = 20;
 pub struct ApiClient {
     base_url: String,
     client: reqwest::Client,
-    req_id: Arc<AtomicU64>,
     agent_token: Arc<RwLock<Option<String>>>,
-    slice_id: Arc<RwLock<Option<String>>>,
     next_request_ts: Arc<Mutex<Option<Instant>>>,
-    interceptors: Arc<Vec<Arc<dyn ApiInterceptor + 'static>>>,
 }
 
 impl ApiClient {
-    pub fn new(interceptors: Vec<Arc<dyn ApiInterceptor + 'static>>) -> ApiClient {
+    pub fn new() -> ApiClient {
         let user_agent = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         let client = reqwest::ClientBuilder::new()
             .user_agent(user_agent)
@@ -43,11 +33,8 @@ impl ApiClient {
         ApiClient {
             client,
             base_url: CONFIG.api_base_url.to_string(),
-            req_id: Arc::new(AtomicU64::new(0)),
             agent_token: Arc::new(RwLock::new(None)),
-            slice_id: Arc::new(RwLock::new(None)),
             next_request_ts: Arc::new(Mutex::new(None)),
-            interceptors: Arc::new(interceptors),
         }
     }
 
@@ -57,14 +44,6 @@ impl ApiClient {
             panic!("Cannot set agent token while agent token is already set");
         }
         *agent_token = Some(token.to_string());
-    }
-
-    pub fn set_slice_id(&self, id: &str) {
-        let mut slice_id = self.slice_id.write().unwrap();
-        if slice_id.is_some() {
-            panic!("Cannot set slice id while slice id is already set");
-        }
-        *slice_id = Some(id.to_string());
     }
 
     // pub async fn status(&self) -> Status {
@@ -77,10 +56,6 @@ impl ApiClient {
 
     pub fn agent_token(&self) -> Option<String> {
         self.agent_token.read().unwrap().clone()
-    }
-
-    pub fn slice_id(&self) -> Option<String> {
-        self.slice_id.read().unwrap().clone()
     }
 
     pub async fn register(&self, faction: &str, callsign: &str) -> String {
@@ -416,16 +391,11 @@ impl ApiClient {
         U: Serialize,
     {
         self.wait_rate_limit().await;
-        let req_id = self.req_id.fetch_add(1, Ordering::Relaxed);
         let url = format!("{}{}", self.base_url, path);
         let mut request = self.client.request(method.clone(), &url);
         if let Some(body) = json_body {
             request = request.json(body);
         }
-        let request_body = match json_body {
-            Some(body) => serde_json::to_string(body).unwrap(),
-            None => String::new(),
-        };
         // override auth type for /register
         if path == "/register" {
             let account_token = std::env::var("SPACETRADERS_ACCOUNT_TOKEN")
@@ -438,26 +408,6 @@ impl ApiClient {
         let status = response.status();
         debug!("{} {} {}", status.as_u16(), method, path);
         let response_body = response.text().await.unwrap();
-
-        // Call after_response interceptor
-        for interceptor in self.interceptors.iter() {
-            let slice_id = match self.slice_id() {
-                Some(slice_id) => slice_id,
-                None => {
-                    warn!("Slice ID not set, skipping message");
-                    continue;
-                }
-            };
-            interceptor.after_response(
-                &slice_id,
-                req_id,
-                &method,
-                path,
-                status,
-                &request_body,
-                &response_body,
-            );
-        }
 
         if status.is_success() {
             (status, Ok(response_body))

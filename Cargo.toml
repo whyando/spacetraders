@@ -18,12 +18,6 @@ warp = "0.3"
 diesel = { version = "2", features = ["postgres", "chrono", "serde_json", "uuid"] }
 diesel-async = { version = "0.5", features = ["postgres", "deadpool"] }
 
-# kafka
-rdkafka = { version = "0.37.0" }
-
-# scylla
-scylla = { version = "1", features = ["chrono-04"] }
-
 # computation/optimisation libs
 vrp-core = "1.25"
 pathfinding = "4.8.2"

@@ -14,7 +14,7 @@ async fn main() -> io::Result<()> {
 
     let callsign = env::var("AGENT_CALLSIGN").expect("AGENT_CALLSIGN env var not set");
 
-    let api_client = ApiClient::new(vec![]);
+    let api_client = ApiClient::new();
     let status = api_client.status().await.1.unwrap();
     let db = DbClient::new(&status.reset_date).await;
     let universe = Arc::new(Universe::new(&api_client, &db).await);
