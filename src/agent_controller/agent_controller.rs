@@ -34,12 +34,6 @@ use strum::EnumString;
 use tokio::time::MissedTickBehavior;
 
 #[derive(Clone, Debug)]
-pub enum Event {
-    ShipUpdate(Box<Ship>),
-    AgentUpdate(Agent),
-}
-
-#[derive(Clone, Debug)]
 enum BuyShipResult {
     Bought(String),
     FailedNeverPurchase,
@@ -159,10 +153,6 @@ impl AgentController {
             .collect()
     }
 
-    pub fn emit_event(&self, _event: &Event) {
-        // Empty
-    }
-
     pub async fn transfer_cargo(
         &self,
         src_ship_symbol: String,
@@ -190,17 +180,14 @@ impl AgentController {
             .post::<Data<TransferResponse>, _>(&uri, &body)
             .await
             .data;
-        let (src_ship, dest_ship) = {
+        {
             let src_ship = self.ships.get(&src_ship_symbol).unwrap();
             let dest_ship = self.ships.get(&dest_ship_symbol).unwrap();
             let mut src_ship = src_ship.lock().unwrap();
             let mut dest_ship = dest_ship.lock().unwrap();
             src_ship.cargo = cargo;
             dest_ship.cargo = target_cargo;
-            (src_ship.clone(), dest_ship.clone())
-        };
-        self.emit_event(&Event::ShipUpdate(Box::new(src_ship)));
-        self.emit_event(&Event::ShipUpdate(Box::new(dest_ship)));
+        }
         debug!("agent_controller::transfer_cargo done");
     }
 
@@ -362,7 +349,6 @@ impl AgentController {
         *ship_config = config;
     }
     pub fn update_agent(&self, agent_upd: Agent) {
-        self.emit_event(&Event::AgentUpdate(agent_upd.clone()));
         let mut agent = self.agent.lock().unwrap();
         *agent = agent_upd;
         self.ledger.set_credits(agent.credits);

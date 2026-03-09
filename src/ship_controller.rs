@@ -1,4 +1,3 @@
-use crate::agent_controller::Event;
 use crate::api_client::api_models::{
     ExtractResponse, JettisonResponse, NavigateResponse, OrbitResponse, RefuelResponse,
     SiphonResponse, SurveyResponse, TradeResponse,
@@ -88,44 +87,25 @@ impl ShipController {
         let ship = self.ship.lock().unwrap();
         ship.cargo.units == 0
     }
-    pub fn emit_ship(&self) {
-        let ship = self.ship();
-        self.agent_controller.emit_event(&Event::ShipUpdate(Box::new(ship)));
-    }
     pub fn update_nav_status(&self, status: ShipNavStatus) {
-        {
-            let mut ship = self.ship.lock().unwrap();
-            ship.nav.status = status;
-        }
-        self.emit_ship();
+        let mut ship = self.ship.lock().unwrap();
+        ship.nav.status = status;
     }
     pub fn update_nav(&self, nav: ShipNav) {
-        {
-            let mut ship = self.ship.lock().unwrap();
-            ship.nav = nav;
-        }
-        self.emit_ship();
+        let mut ship = self.ship.lock().unwrap();
+        ship.nav = nav;
     }
     pub fn update_fuel(&self, fuel: ShipFuel) {
-        {
-            let mut ship = self.ship.lock().unwrap();
-            ship.fuel = fuel;
-        }
-        self.emit_ship();
+        let mut ship = self.ship.lock().unwrap();
+        ship.fuel = fuel;
     }
     pub fn update_cargo(&self, cargo: ShipCargo) {
-        {
-            let mut ship = self.ship.lock().unwrap();
-            ship.cargo = cargo;
-        }
-        self.emit_ship();
+        let mut ship = self.ship.lock().unwrap();
+        ship.cargo = cargo;
     }
     pub fn update_cooldown(&self, cooldown: ShipCooldown) {
-        {
-            let mut ship = self.ship.lock().unwrap();
-            ship.cooldown = cooldown;
-        }
-        self.emit_ship();
+        let mut ship = self.ship.lock().unwrap();
+        ship.cooldown = cooldown;
     }
     pub fn cargo_first_item(&self) -> Option<ShipCargoItem> {
         let ship = self.ship.lock().unwrap();
