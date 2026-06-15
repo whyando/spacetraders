@@ -177,9 +177,12 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
+    // (src_ship, dest_ship, good, units)
+    type RecordedTransfer = (String, String, String, i64);
+
     #[derive(Debug, Clone)]
     struct MockTransferActor {
-        transfers: Arc<Mutex<Vec<(String, String, String, i64)>>>,
+        transfers: Arc<Mutex<Vec<RecordedTransfer>>>,
     }
     impl MockTransferActor {
         fn new() -> Self {

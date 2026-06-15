@@ -78,14 +78,14 @@ impl Universe {
             api_client: api_client.clone(),
             db: db.clone(),
 
-            systems: DashMap::from_iter(systems.into_iter()),
+            systems: DashMap::from_iter(systems),
             constructions: DashMap::new(),
-            remote_markets: DashMap::from_iter(remote_markets.into_iter()),
-            remote_shipyards: DashMap::from_iter(remote_shipyards.into_iter()),
-            markets: DashMap::from_iter(markets.into_iter()),
-            shipyards: DashMap::from_iter(shipyards.into_iter()),
-            factions: DashMap::from_iter(factions.into_iter()),
-            jumpgates: DashMap::from_iter(jumpgates.into_iter()),
+            remote_markets: DashMap::from_iter(remote_markets),
+            remote_shipyards: DashMap::from_iter(remote_shipyards),
+            markets: DashMap::from_iter(markets),
+            shipyards: DashMap::from_iter(shipyards),
+            factions: DashMap::from_iter(factions),
+            jumpgates: DashMap::from_iter(jumpgates),
 
             warp_jump_graph: Cache::new(1),
         }
