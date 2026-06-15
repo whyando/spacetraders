@@ -3,7 +3,7 @@ replicaCount: 1
 image:
   repository: registry.whyando.com/whyando/spacetraders
   pullPolicy: IfNotPresent
-  tag: "0.5.8"
+  tag: "0.5.9"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -24,6 +24,20 @@ env: []
 #     value: whyando_{RESET_DATE}
 #   - name: SPACETRADERS_ACCOUNT_TOKEN
 #     value: "eyJ..."
+
+# The embedded read-only web dashboard (current agent, credits/net-worth history, fleet).
+# The container listens on service.port (also passed through as WEB_PORT).
+service:
+  port: 8080
+
+# Expose the dashboard at a hostname via ingress-nginx + cert-manager TLS.
+# Disabled by default; enable per-agent (e.g. the one that owns the apex domain).
+ingress:
+  enabled: false
+  className: nginx
+  clusterIssuer: letsencrypt-prod
+  host: ""
+  annotations: {}
 
 podAnnotations: {}
 podLabels: {}

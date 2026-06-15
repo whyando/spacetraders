@@ -43,7 +43,13 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/app/main"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
           env:
+            - name: WEB_PORT
+              value: {{ .Values.service.port | quote }}
             - name: RUST_LOG
               value: "info,st=debug,main=debug,debug_view=debug"
             - name: RUST_BACKTRACE

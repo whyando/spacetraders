@@ -1,6 +1,6 @@
 [package]
 name = "st"
-version = "0.5.8"
+version = "0.5.9"
 edition = "2024"
 default-run = "main"
 publish = false
@@ -9,9 +9,10 @@ license = "MIT"
 [dependencies]
 
 # tokio/hyper stack
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 futures = "0.3.32"
 reqwest = { version = "0.13", features = ["json", "native-tls"] }
+axum = "0.8"
 
 # postgres
 diesel = { version = "2", features = ["postgres", "chrono", "serde_json", "uuid"] }

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SpaceTraders Agent</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root {
+    --bg: #0b0f1a;
+    --panel: #141a2b;
+    --panel-2: #1b2236;
+    --border: #263150;
+    --text: #e6ecff;
+    --muted: #8a96b8;
+    --accent: #5b8cff;
+    --good: #38d39f;
+    --warn: #ffb454;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: 0.3px; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px 28px 60px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; }
+  .card .value { font-size: 26px; font-weight: 650; margin-top: 6px; }
+  .card .value.credits { color: var(--good); }
+  .card .value.networth { color: var(--accent); }
+  section { margin-top: 28px; }
+  section h2 { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.6px; }
+  .chartbox { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 14px; font-size: 13px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+  tr:last-child td { border-bottom: none; }
+  td.mono, th.mono { font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .pill.DOCKED { background: rgba(91,140,255,0.18); color: var(--accent); }
+  .pill.IN_ORBIT { background: rgba(56,211,159,0.18); color: var(--good); }
+  .pill.IN_TRANSIT { background: rgba(255,180,84,0.18); color: var(--warn); }
+  .bar { background: var(--panel-2); border-radius: 6px; height: 6px; width: 90px; overflow: hidden; display: inline-block; vertical-align: middle; }
+  .bar > span { display: block; height: 100%; background: var(--accent); }
+  .updated { color: var(--muted); font-size: 12px; margin-left: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="callsign">SpaceTraders Agent</h1>
+  <span class="sub" id="subtitle"></span>
+  <span class="updated" id="updated"></span>
+</header>
+<div class="wrap">
+  <div class="cards">
+    <div class="card"><div class="label">Credits</div><div class="value credits" id="credits">-</div></div>
+    <div class="card"><div class="label">Net Worth</div><div class="value networth" id="networth">-</div></div>
+    <div class="card"><div class="label">Ships</div><div class="value" id="ships">-</div></div>
+    <div class="card"><div class="label">Headquarters</div><div class="value" id="hq" style="font-size:18px">-</div></div>
+  </div>
+
+  <section>
+    <h2>Credits &amp; Net Worth History</h2>
+    <div class="chartbox"><canvas id="history" height="110"></canvas></div>
+  </section>
+
+  <section>
+    <h2>Fleet</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Ship</th><th>Role</th><th>Status</th><th>Location</th>
+          <th class="mono">Fuel</th><th class="mono">Cargo</th><th>Activity</th>
+        </tr>
+      </thead>
+      <tbody id="fleet"></tbody>
+    </table>
+  </section>
+</div>
+
+<script>
+const fmt = new Intl.NumberFormat("en-US");
+function credits(n) { return "$" + fmt.format(n); }
+
+async function getJSON(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(url + " -> " + r.status);
+  return r.json();
+}
+
+let chart;
+function renderHistory(points) {
+  const labels = points.map(p => new Date(p.ts).toLocaleString());
+  const credits = points.map(p => p.credits);
+  const networth = points.map(p => p.net_worth);
+  const data = {
+    labels,
+    datasets: [
+      { label: "Net Worth", data: networth, borderColor: "#5b8cff", backgroundColor: "rgba(91,140,255,0.12)", fill: true, tension: 0.25, pointRadius: 0, borderWidth: 2 },
+      { label: "Credits", data: credits, borderColor: "#38d39f", backgroundColor: "rgba(56,211,159,0.10)", fill: true, tension: 0.25, pointRadius: 0, borderWidth: 2 },
+    ],
+  };
+  const opts = {
+    responsive: true,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: "#e6ecff" } }, tooltip: { callbacks: { label: c => c.dataset.label + ": $" + fmt.format(c.parsed.y) } } },
+    scales: {
+      x: { ticks: { color: "#8a96b8", maxTicksLimit: 8 }, grid: { color: "rgba(38,49,80,0.5)" } },
+      y: { ticks: { color: "#8a96b8", callback: v => "$" + fmt.format(v) }, grid: { color: "rgba(38,49,80,0.5)" } },
+    },
+  };
+  if (chart) { chart.data = data; chart.update(); }
+  else { chart = new Chart(document.getElementById("history"), { type: "line", data, options: opts }); }
+}
+
+function renderFleet(ships) {
+  const rows = ships.map(s => {
+    const fuelPct = s.fuel_capacity ? Math.round(100 * s.fuel_current / s.fuel_capacity) : 0;
+    const cargoPct = s.cargo_capacity ? Math.round(100 * s.cargo_units / s.cargo_capacity) : 0;
+    return `<tr>
+      <td class="mono">${s.symbol}</td>
+      <td>${s.role || "-"}</td>
+      <td><span class="pill ${s.nav_status}">${s.nav_status}</span></td>
+      <td class="mono">${s.waypoint}</td>
+      <td class="mono">${s.fuel_current}/${s.fuel_capacity} <span class="bar"><span style="width:${fuelPct}%"></span></span></td>
+      <td class="mono">${s.cargo_units}/${s.cargo_capacity} <span class="bar"><span style="width:${cargoPct}%;background:var(--good)"></span></span></td>
+      <td>${s.status || "-"}</td>
+    </tr>`;
+  }).join("");
+  document.getElementById("fleet").innerHTML = rows || `<tr><td colspan="7" style="color:var(--muted)">No ships</td></tr>`;
+}
+
+async function refresh() {
+  try {
+    const [agent, ships, history] = await Promise.all([
+      getJSON("/api/agent"), getJSON("/api/ships"), getJSON("/api/history"),
+    ]);
+    document.getElementById("callsign").textContent = agent.callsign;
+    document.getElementById("subtitle").textContent = agent.starting_faction + " \u00b7 " + agent.num_ships + " ships";
+    document.getElementById("credits").textContent = credits(agent.credits);
+    document.getElementById("networth").textContent = credits(agent.net_worth);
+    document.getElementById("ships").textContent = agent.num_ships;
+    document.getElementById("hq").textContent = agent.headquarters;
+    renderHistory(history);
+    renderFleet(ships);
+    document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById("updated").textContent = "error: " + e.message;
+  }
+}
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>

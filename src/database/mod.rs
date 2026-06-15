@@ -323,6 +323,23 @@ impl DbClient {
             .expect("DB Query error");
     }
 
+    // Recent KPI history (ascending by ts) for charting credits / net worth.
+    pub async fn get_metrics_history(&self, limit: i64) -> Vec<(chrono::DateTime<Utc>, i64, i64)> {
+        let mut rows: Vec<(chrono::DateTime<Utc>, i64, i64)> = agent_metrics::table
+            .select((
+                agent_metrics::ts,
+                agent_metrics::credits,
+                agent_metrics::net_worth,
+            ))
+            .order(agent_metrics::ts.desc())
+            .limit(limit)
+            .load(&mut self.conn().await)
+            .await
+            .expect("DB Query error");
+        rows.reverse();
+        rows
+    }
+
     // Log a non-market cash event (amount signed: negative = credits out).
     pub async fn insert_agent_transaction(
         &self,

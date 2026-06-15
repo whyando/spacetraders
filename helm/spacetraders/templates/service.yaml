@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "spacetraders.fullname" . }}
+  labels:
+    {{- include "spacetraders.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "spacetraders.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

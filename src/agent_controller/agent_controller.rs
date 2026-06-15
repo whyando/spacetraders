@@ -256,6 +256,18 @@ impl AgentController {
                 self_clone.controller_loop().await;
             }),
         );
+        let web_controller = self.clone();
+        let web_db = self.ctx.db.clone();
+        let web_port = std::env::var("WEB_PORT")
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(8080);
+        self.fleet.hdls.push(
+            "web server",
+            tokio::spawn(async move {
+                crate::web::serve(web_controller, web_db, web_port).await;
+            }),
+        );
         self.fleet.hdls.join().await;
     }
 

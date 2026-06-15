@@ -17,3 +17,4 @@ pub mod ship_scripts;
 pub mod survey_manager;
 pub mod tasks;
 pub mod util;
+pub mod web;
