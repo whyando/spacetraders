@@ -1,12 +1,16 @@
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: {{ include "spacetraders.fullname" . }}
   labels:
     {{- include "spacetraders.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
-  serviceName: {{ include "spacetraders.fullname" . }}
+  # A SpaceTraders agent is bound to a single callsign/token. Two pods running the
+  # same agent would double-issue API calls and corrupt shared state, so we never
+  # want overlapping pods -- Recreate tears down the old pod before starting the new.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "spacetraders.selectorLabels" . | nindent 6 }}
@@ -39,15 +43,16 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/app/main"]
-          args: []
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
           env:
             - name: RUST_LOG
-              value: info,st=debug,main=debug,debug_view=debug
+              value: "info,st=debug,main=debug,debug_view=debug"
             - name: RUST_BACKTRACE
               value: "1"
-            {{- toYaml .Values.env | nindent 12 }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
           {{- with .Values.volumeMounts }}
           volumeMounts:
             {{- toYaml . | nindent 12 }}

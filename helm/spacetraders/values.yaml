@@ -1,28 +1,49 @@
 replicaCount: 1
 
 image:
-  repository: registry.jpa-dev.whyando.com/whyando/spacetraders
+  repository: registry.whyando.com/whyando/spacetraders
   pullPolicy: IfNotPresent
-  tag: 0.2.0
+  tag: "0.5.5"
 
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# Extra environment variables passed straight to the container (list of name/value).
+# RUST_LOG and RUST_BACKTRACE are always set by the template. Per-agent values files
+# (e.g. agents/WHYANDO.yaml in the deployment repo) supply the full set, including the
+# required AGENT_CALLSIGN, POSTGRES_URI, POSTGRES_SCHEMA, and SPACETRADERS_ACCOUNT_TOKEN.
+env: []
+# Example:
+# env:
+#   - name: AGENT_CALLSIGN
+#     value: WHYANDO
+#   - name: POSTGRES_URI
+#     value: postgres://postgres:pass@postgresql.postgres.svc.cluster.local:5432/spacetraders
+#   - name: POSTGRES_SCHEMA
+#     value: whyando_{RESET_DATE}
+#   - name: SPACETRADERS_ACCOUNT_TOKEN
+#     value: "eyJ..."
+
 podAnnotations: {}
 podLabels: {}
 
 podSecurityContext: {}
-
 securityContext: {}
 
-resources: {}
+# The bot is light at idle but the vrp-core logistics solver bursts across cores
+# when replanning, so we leave generous CPU headroom while keeping memory modest.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
 
 volumes: []
 volumeMounts: []
 
 nodeSelector: {}
-
 tolerations: []
-
 affinity: {}

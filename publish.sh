@@ -2,7 +2,7 @@
 set -e
 
 # Configuration
-REGISTRY="registry.jpa-dev.whyando.com"
+REGISTRY="registry.whyando.com"
 IMAGE_NAME="whyando/spacetraders"
 VERSION=$(grep '^version = ' Cargo.toml | cut -d'"' -f2)
 

@@ -1,5 +1,5 @@
 # Layer 1: Builder
-FROM rust:1.86-alpine AS builder
+FROM rust:1.96-alpine AS builder
 WORKDIR /usr/src/app
 
 # Install build dependencies
