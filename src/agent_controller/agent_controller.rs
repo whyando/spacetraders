@@ -290,15 +290,20 @@ impl AgentController {
 
     // Append a KPI snapshot for time-series analysis (equity curve, fleet size).
     async fn record_metrics(&self) {
+        let credits = self.ctx.ledger.credits();
+        let cargo_value = self.ctx.ledger.cargo_value();
+        // net worth ~= liquid credits + in-transit cargo + ship cost basis
+        let net_worth = credits + cargo_value + self.ctx.db.ship_cost_basis().await;
         self.ctx
             .db
             .insert_agent_metrics(
                 Utc::now(),
-                self.ctx.ledger.credits(),
+                credits,
                 self.ctx.ledger.available_credits(),
                 self.ctx.ledger.effective_reserved_credits(),
-                self.ctx.ledger.cargo_value(),
+                cargo_value,
                 self.num_ships() as i32,
+                net_worth,
             )
             .await;
     }

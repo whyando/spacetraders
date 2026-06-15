@@ -8,6 +8,19 @@ diesel::table! {
         reserved_credits -> Int8,
         cargo_value -> Int8,
         num_ships -> Int4,
+        net_worth -> Int8,
+    }
+}
+
+diesel::table! {
+    agent_transaction_log (id, ts) {
+        id -> Int8,
+        ts -> Timestamptz,
+        #[sql_name = "type"]
+        type_ -> Text,
+        reference -> Nullable<Text>,
+        waypoint -> Nullable<Text>,
+        amount -> Int8,
     }
 }
 
@@ -132,6 +145,7 @@ diesel::table! {
 
 diesel::allow_tables_to_appear_in_same_query!(
     agent_metrics,
+    agent_transaction_log,
     generic_lookup,
     jumpgate_connections,
     market_transaction_log,

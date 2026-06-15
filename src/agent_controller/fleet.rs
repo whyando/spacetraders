@@ -175,6 +175,16 @@ impl FleetManager {
             "Successfully bought ship {} for ${}",
             ship_symbol, transaction.price
         ));
+        self.ctx
+            .db
+            .insert_agent_transaction(
+                transaction.timestamp,
+                "ship_purchase",
+                Some(&transaction.ship_type),
+                Some(&transaction.waypoint_symbol.to_string()),
+                -transaction.price,
+            )
+            .await;
         self.ctx.update_agent(agent);
         self.ctx
             .ships

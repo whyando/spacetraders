@@ -77,11 +77,28 @@ impl ContractManager {
             .data;
 
         assert_eq!(contract.id, contract_id);
-        match path {
-            "accept" => assert!(contract.accepted),
-            "fulfill" => assert!(contract.fulfilled),
+        let (txn_type, amount) = match path {
+            "accept" => {
+                assert!(contract.accepted);
+                ("contract_accept", contract.terms.payment.on_accepted)
+            }
+            "fulfill" => {
+                assert!(contract.fulfilled);
+                ("contract_fulfill", contract.terms.payment.on_fulfilled)
+            }
             _ => panic!("invalid contract action: {}", path),
-        }
+        };
+
+        self.ctx
+            .db
+            .insert_agent_transaction(
+                chrono::Utc::now(),
+                txn_type,
+                Some(&contract_id),
+                None,
+                amount,
+            )
+            .await;
 
         self.ctx.update_contract(contract);
         self.ctx.update_agent(agent);

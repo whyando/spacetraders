@@ -18,7 +18,7 @@ use diesel::OptionalExtension as _;
 use diesel::QueryDsl as _;
 use diesel::QueryableByName;
 use diesel::SelectableHelper as _;
-use diesel::sql_types::{Integer, Text};
+use diesel::sql_types::{BigInt, Integer, Text};
 use diesel::upsert::excluded;
 use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl as _;
@@ -304,6 +304,7 @@ impl DbClient {
         reserved_credits: i64,
         cargo_value: i64,
         num_ships: i32,
+        net_worth: i64,
     ) {
         diesel::insert_into(agent_metrics::table)
             .values((
@@ -313,12 +314,53 @@ impl DbClient {
                 agent_metrics::reserved_credits.eq(reserved_credits),
                 agent_metrics::cargo_value.eq(cargo_value),
                 agent_metrics::num_ships.eq(num_ships),
+                agent_metrics::net_worth.eq(net_worth),
             ))
             .on_conflict(agent_metrics::ts)
             .do_nothing()
             .execute(&mut self.conn().await)
             .await
             .expect("DB Query error");
+    }
+
+    // Log a non-market cash event (amount signed: negative = credits out).
+    pub async fn insert_agent_transaction(
+        &self,
+        ts: chrono::DateTime<Utc>,
+        type_: &str,
+        reference: Option<&str>,
+        waypoint: Option<&str>,
+        amount: i64,
+    ) {
+        diesel::insert_into(agent_transaction_log::table)
+            .values((
+                agent_transaction_log::ts.eq(ts),
+                agent_transaction_log::type_.eq(type_),
+                agent_transaction_log::reference.eq(reference),
+                agent_transaction_log::waypoint.eq(waypoint),
+                agent_transaction_log::amount.eq(amount),
+            ))
+            .execute(&mut self.conn().await)
+            .await
+            .expect("DB Query error");
+    }
+
+    // Cumulative credits spent on ships (cost basis), used to approximate net worth.
+    pub async fn ship_cost_basis(&self) -> i64 {
+        #[derive(QueryableByName)]
+        struct SumRet {
+            #[diesel(sql_type = BigInt)]
+            total: i64,
+        }
+        // amounts are negative (credits out); negate to return positive cost basis
+        let result: SumRet = diesel::sql_query(
+            "SELECT COALESCE(-SUM(amount), 0)::bigint AS total \
+             FROM agent_transaction_log WHERE type = 'ship_purchase'",
+        )
+        .get_result(&mut self.conn().await)
+        .await
+        .expect("DB Query error");
+        result.total
     }
 
     // Shouldn't be needed, since we shouldn't be loading individual shipyards
