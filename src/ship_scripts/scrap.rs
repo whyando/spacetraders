@@ -12,8 +12,9 @@ pub async fn run(ship: ShipController) {
     ship.wait_for_transit().await;
 
     let system_symbol = ship.system();
-    let waypoints = ship.universe.get_system_waypoints(&system_symbol).await;
+    let waypoints = ship.ctx.universe.get_system_waypoints(&system_symbol).await;
     let shipyards = ship
+        .ctx
         .universe
         .get_system_shipyards_remote(&system_symbol)
         .await;

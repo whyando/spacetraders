@@ -1,4 +1,6 @@
-use crate::{models::WaypointSymbol, ship_controller::ShipController};
+use crate::{
+    agent_controller::AgentController, models::WaypointSymbol, ship_controller::ShipController,
+};
 use ExplorerState::*;
 use log::*;
 use pathfinding::directed::dijkstra::dijkstra;
@@ -11,26 +13,28 @@ enum ExplorerState {
     Exit,
 }
 
-pub async fn run_jumpgate_probe(ship: ShipController) {
+pub async fn run_jumpgate_probe(ship: ShipController, ac: AgentController) {
     info!("Starting script jumpgate probe for {}", ship.symbol());
     ship.wait_for_transit().await;
 
     let mut state = Init;
 
     while state != Exit {
-        let next_state = tick(&ship, &state).await;
+        let next_state = tick(&ship, &state, &ac).await;
         if let Some(next_state) = next_state {
             state = next_state;
         }
     }
 }
 
-async fn tick(ship: &ShipController, state: &ExplorerState) -> Option<ExplorerState> {
+async fn tick(
+    ship: &ShipController,
+    state: &ExplorerState,
+    ac: &AgentController,
+) -> Option<ExplorerState> {
     match state {
         Init => {
-            // Could be existing reservation, or a new one
-            let target = ship
-                .agent_controller
+            let target = ac
                 .get_probe_jumpgate_reservation(&ship.symbol(), &ship.waypoint())
                 .await;
             let desc = match &target {
@@ -44,10 +48,9 @@ async fn tick(ship: &ShipController, state: &ExplorerState) -> Option<ExplorerSt
             }
         }
         Exploring(target_jumpgate) => {
-            let start_jumpgate = ship.universe.get_jumpgate(&ship.system()).await;
+            let start_jumpgate = ship.ctx.universe.get_jumpgate(&ship.system()).await;
 
-            // Plan route
-            let graph = ship.universe.jumpgate_graph().await;
+            let graph = ship.ctx.universe.jumpgate_graph().await;
             let (path, duration) = dijkstra(
                 &start_jumpgate,
                 |node| graph.get(node).unwrap().active_connections.clone(),
@@ -71,16 +74,14 @@ async fn tick(ship: &ShipController, state: &ExplorerState) -> Option<ExplorerSt
             for gate in path.iter().skip(1) {
                 ship.jump(gate).await;
             }
-            // Get connections
             assert_eq!(ship.waypoint(), *target_jumpgate);
             let _connections = ship
+                .ctx
                 .universe
                 .get_jumpgate_connections(target_jumpgate)
                 .await;
 
-            ship.agent_controller
-                .clear_probe_jumpgate_reservation(&ship.symbol())
-                .await;
+            ac.clear_probe_jumpgate_reservation(&ship.symbol()).await;
             Some(Init)
         }
         Exit => {

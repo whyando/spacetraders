@@ -21,8 +21,8 @@ use std::cmp::min;
 
 async fn get_export_market(ship: &ShipController, good: &str) -> WaypointSymbol {
     let filters = vec![WaypointFilter::Exports(good.to_string())];
-    let system = ship.agent_controller.starting_system();
-    let waypoints = ship.universe.search_waypoints(&system, &filters).await;
+    let system = ship.ctx.starting_system();
+    let waypoints = ship.ctx.universe.search_waypoints(&system, &filters).await;
     assert_eq!(
         waypoints.len(),
         1,
@@ -34,8 +34,9 @@ async fn get_export_market(ship: &ShipController, good: &str) -> WaypointSymbol 
 }
 
 async fn get_jump_gate(ship: &ShipController) -> WaypointSymbol {
-    let system = ship.agent_controller.starting_system();
+    let system = ship.ctx.starting_system();
     let waypoints = ship
+        .ctx
         .universe
         .search_waypoints(&system, &[WaypointFilter::JumpGate])
         .await;
@@ -102,7 +103,7 @@ async fn tick(
 ) -> Option<ConstructionHaulerState> {
     match state {
         Buying => {
-            let construction = ship.universe.get_construction(jump_gate_symbol).await;
+            let construction = ship.ctx.universe.get_construction(jump_gate_symbol).await;
             let construction: &Construction = match &construction.data {
                 None => return Some(Completed),
                 Some(x) if x.is_complete => return Some(Completed),
@@ -132,7 +133,7 @@ async fn tick(
                     "ADVANCED_CIRCUITRY" => 1_000_000,
                     _ => panic!("Unknown construction good: {}", mat.trade_symbol),
                 };
-                let market = ship.universe.get_market(market_symbol);
+                let market = ship.ctx.universe.get_market(market_symbol);
                 if let Some(market) = market {
                     let good = market
                         .data
@@ -154,7 +155,7 @@ async fn tick(
                         ship.goto_waypoint(market_symbol).await;
 
                         let expected_cost = good.purchase_price * units;
-                        let credits = ship.agent_controller.ledger.available_credits();
+                        let credits = ship.ctx.ledger.available_credits();
                         if expected_cost > credits - credit_buffer {
                             debug!(
                                 "Insufficient funds to buy {} units of {}. {}/{} (buffer: {})",

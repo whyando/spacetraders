@@ -39,7 +39,7 @@ pub async fn probe_multiple_locations(ship: ShipController, config: &ProbeScript
 
     let mut waypoints = vec![];
     for waypoint_symbol in &config.waypoints {
-        let waypoint = ship.universe.detailed_waypoint(waypoint_symbol).await;
+        let waypoint = ship.ctx.universe.detailed_waypoint(waypoint_symbol).await;
         waypoints.push(waypoint);
     }
 
@@ -93,18 +93,19 @@ pub async fn probe_single_location(ship_controller: ShipController, config: &Pro
     );
     ship_controller.wait_for_transit().await;
     let waypoint = ship_controller
+        .ctx
         .universe
         .detailed_waypoint(waypoint_symbol)
         .await;
 
     if ship_controller.system() != waypoint.system_symbol {
-        // Assume we can do a single jump to the correct system
-        // nav to jumpgate
         let jumpgate_src = ship_controller
+            .ctx
             .universe
             .get_jumpgate(&ship_controller.system())
             .await;
         let jumpgate_dest = ship_controller
+            .ctx
             .universe
             .get_jumpgate(&waypoint.system_symbol)
             .await;
@@ -128,7 +129,7 @@ pub async fn probe_single_location(ship_controller: ShipController, config: &Pro
         let now = chrono::Utc::now();
         let mut next: DateTime<Utc> = now + Duration::try_minutes(15).unwrap();
         if waypoint.is_market() {
-            let market = ship_controller.universe.get_market(waypoint_symbol);
+            let market = ship_controller.ctx.universe.get_market(waypoint_symbol);
             let next_refresh = match market {
                 Some(market) => market.timestamp.add(*MARKET_REFRESH_INTERVAL),
                 None => now,
@@ -141,7 +142,7 @@ pub async fn probe_single_location(ship_controller: ShipController, config: &Pro
         }
 
         if waypoint.is_shipyard() {
-            let shipyard = ship_controller.universe.get_shipyard(waypoint_symbol);
+            let shipyard = ship_controller.ctx.universe.get_shipyard(waypoint_symbol);
             let next_refresh = match shipyard {
                 Some(market) => market.timestamp + *SHIPYARD_REFRESH_INTERVAL,
                 None => now,

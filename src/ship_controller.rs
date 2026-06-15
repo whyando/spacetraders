@@ -1,12 +1,11 @@
+use crate::agent_controller::AgentContext;
 use crate::api_client::api_models::{
     ExtractResponse, JettisonResponse, NavigateResponse, OrbitResponse, RefuelResponse,
     SiphonResponse, SurveyResponse, TradeResponse,
 };
 use crate::models::{ShipCargoItem, ShipCooldown};
 use crate::ship_controller::ShipNavStatus::*;
-use crate::{
-    agent_controller::AgentController, api_client::ApiClient, models::*, universe::Universe,
-};
+use crate::models::*;
 use chrono::{DateTime, Duration, Utc};
 use log::*;
 use reqwest::{Method, StatusCode};
@@ -19,26 +18,16 @@ use std::sync::{Arc, Mutex};
 pub struct ShipController {
     pub ship_symbol: String,
     ship: Arc<Mutex<Ship>>,
-
-    api_client: ApiClient,
-    pub universe: Arc<Universe>,
-    pub agent_controller: AgentController,
+    pub ctx: Arc<AgentContext>,
 }
 
 impl ShipController {
-    pub fn new(
-        api_client: &ApiClient,
-        universe: &Arc<Universe>,
-        ship: Arc<Mutex<Ship>>,
-        agent_controller: &AgentController,
-    ) -> ShipController {
+    pub fn new(ctx: &Arc<AgentContext>, ship: Arc<Mutex<Ship>>) -> ShipController {
         let symbol = ship.lock().unwrap().symbol.clone();
         ShipController {
-            api_client: api_client.clone(),
-            universe: universe.clone(),
+            ctx: ctx.clone(),
             ship,
             ship_symbol: symbol,
-            agent_controller: agent_controller.clone(),
         }
     }
     pub fn ship(&self) -> Ship {
@@ -142,7 +131,7 @@ impl ShipController {
             return;
         }
         let uri = format!("/my/ships/{}/orbit", self.ship_symbol);
-        let resp: Data<OrbitResponse> = self.api_client.post(&uri, &json!({})).await;
+        let resp: Data<OrbitResponse> = self.ctx.api_client.post(&uri, &json!({})).await;
         self.update_nav(resp.data.nav);
     }
 
@@ -151,7 +140,7 @@ impl ShipController {
             return;
         }
         let uri = format!("/my/ships/{}/dock", self.ship_symbol);
-        let resp: Data<OrbitResponse> = self.api_client.post(&uri, &json!({})).await;
+        let resp: Data<OrbitResponse> = self.ctx.api_client.post(&uri, &json!({})).await;
         self.update_nav(resp.data.nav);
     }
 
@@ -169,6 +158,7 @@ impl ShipController {
         self.debug(&format!("Setting flight mode to {:?}", mode));
         let uri = format!("/my/ships/{}/nav", self.ship_symbol);
         let response: Data<NavUpdateResponse> = self
+            .ctx
             .api_client
             .patch(&uri, &json!({ "flightMode": mode }))
             .await;
@@ -243,15 +233,16 @@ impl ShipController {
             agent,
             transaction,
         } = self
+            .ctx
             .api_client
             .post::<Data<TradeResponse>, _>(&uri, &body)
             .await
             .data;
         self.update_cargo(cargo);
-        self.agent_controller.update_agent(agent);
+        self.ctx.update_agent(agent);
         if adjust_reserved_credits {
             let units = if _type == "purchase" { units } else { -units };
-            self.agent_controller.ledger.register_goods_change(
+            self.ctx.ledger.register_goods_change(
                 &self.ship_symbol,
                 &transaction.trade_symbol,
                 units,
@@ -280,7 +271,7 @@ impl ShipController {
 
     pub async fn sell_all_cargo(&self) {
         self.refresh_market().await;
-        let market = self.universe.get_market(&self.waypoint()).unwrap();
+        let market = self.ctx.universe.get_market(&self.waypoint()).unwrap();
         while let Some(cargo_item) = self.cargo_first_item() {
             let market_good = market
                 .data
@@ -306,6 +297,7 @@ impl ShipController {
             "units": units,
         });
         let JettisonResponse { cargo } = self
+            .ctx
             .api_client
             .post::<Data<JettisonResponse>, _>(&uri, &body)
             .await
@@ -369,6 +361,7 @@ impl ShipController {
             cargo,
             transaction: _,
         } = self
+            .ctx
             .api_client
             .post::<Data<RefuelResponse>, _>(&uri, &body)
             .await
@@ -380,7 +373,7 @@ impl ShipController {
             let expected_cargo_fuel = initial_cargo_fuel - (units + 99) / 100;
             assert_eq!(self.cargo_good_count("FUEL"), expected_cargo_fuel);
         }
-        self.agent_controller.update_agent(agent);
+        self.ctx.update_agent(agent);
     }
 
     pub async fn full_load_cargo(&self, good: &str) {
@@ -406,6 +399,7 @@ impl ShipController {
         self.debug(&format!("Navigating to waypoint: {}", waypoint));
         let uri = format!("/my/ships/{}/navigate", self.ship_symbol);
         let NavigateResponse { nav, fuel, events } = self
+            .ctx
             .api_client
             .post::<Data<NavigateResponse>, _>(&uri, &json!({ "waypointSymbol": waypoint }))
             .await
@@ -428,6 +422,7 @@ impl ShipController {
         self.debug(&format!("Warp to waypoint: {}", waypoint));
         let uri = format!("/my/ships/{}/warp", self.ship_symbol);
         let NavigateResponse { nav, fuel, events } = self
+            .ctx
             .api_client
             .post::<Data<NavigateResponse>, _>(&uri, &json!({ "waypointSymbol": waypoint }))
             .await
@@ -460,16 +455,16 @@ impl ShipController {
             agent,
             transaction: _,
         } = self
+            .ctx
             .api_client
             .post::<Data<JumpResponse>, _>(&uri, &body)
             .await
             .data;
         self.update_nav(nav);
-        self.agent_controller.update_agent(agent);
+        self.ctx.update_agent(agent);
         self.update_cooldown(cooldown);
     }
 
-    // Navigation between two waypoints
     pub async fn goto_waypoint(&self, target: &WaypointSymbol) {
         assert!(!self.is_in_transit(), "Ship is already in transit");
         if self.fuel_capacity() == 0 {
@@ -481,6 +476,7 @@ impl ShipController {
             return;
         }
         let route = self
+            .ctx
             .universe
             .get_route(
                 &self.waypoint(),
@@ -531,12 +527,13 @@ impl ShipController {
             cargo,
             construction,
         } = self
+            .ctx
             .api_client
             .post::<Data<SupplyConstructionResponse>, _>(&uri, &body)
             .await
             .data;
         self.update_cargo(cargo);
-        self.universe.update_construction(&construction).await;
+        self.ctx.universe.update_construction(&construction).await;
     }
 
     pub async fn deliver_contract(&self, contract_id: &str, good: &str, units: i64) {
@@ -552,12 +549,13 @@ impl ShipController {
         let uri = format!("/my/contracts/{}/deliver", contract_id);
         let body = json!({ "shipSymbol": self.ship_symbol, "tradeSymbol": good, "units": units });
         let DeliverContractResponse { cargo, contract } = self
+            .ctx
             .api_client
             .post::<Data<DeliverContractResponse>, _>(&uri, &body)
             .await
             .data;
         self.update_cargo(cargo);
-        self.agent_controller.update_contract(contract);
+        self.ctx.update_contract(contract);
     }
 
     pub async fn refresh_market(&self) {
@@ -566,12 +564,12 @@ impl ShipController {
         let system = self.system();
         self.debug(&format!("Refreshing market at waypoint {}", &waypoint));
         let uri = format!("/systems/{}/waypoints/{}/market", &system, &waypoint);
-        let response: Data<Market> = self.api_client.get(&uri).await;
+        let response: Data<Market> = self.ctx.api_client.get(&uri).await;
         let market = WithTimestamp::<Market> {
             timestamp: chrono::Utc::now(),
             data: response.data,
         };
-        self.universe.save_market(&waypoint, market).await;
+        self.ctx.universe.save_market(&waypoint, market).await;
     }
 
     pub async fn refresh_shipyard(&self) {
@@ -580,12 +578,12 @@ impl ShipController {
         let system = self.system();
         self.debug(&format!("Refreshing shipyard at waypoint {}", &waypoint));
         let uri = format!("/systems/{}/waypoints/{}/shipyard", &system, &waypoint);
-        let response: Data<Shipyard> = self.api_client.get(&uri).await;
+        let response: Data<Shipyard> = self.ctx.api_client.get(&uri).await;
         let shipyard = WithTimestamp::<Shipyard> {
             timestamp: chrono::Utc::now(),
             data: response.data,
         };
-        self.universe.save_shipyard(&waypoint, shipyard).await;
+        self.ctx.universe.save_shipyard(&waypoint, shipyard).await;
     }
 
     pub async fn survey(&self) {
@@ -594,6 +592,7 @@ impl ShipController {
         self.debug(&format!("Surveying {}", self.waypoint()));
         let uri = format!("/my/ships/{}/survey", self.ship_symbol);
         let SurveyResponse { cooldown, surveys } = self
+            .ctx
             .api_client
             .post::<Data<SurveyResponse>, _>(&uri, &json!({}))
             .await
@@ -608,10 +607,7 @@ impl ShipController {
             self.debug(&format!("Surveyed {} {}", survey.size, deposits));
         }
         self.update_cooldown(cooldown);
-        self.agent_controller
-            .survey_manager
-            .insert_surveys(surveys)
-            .await;
+        self.ctx.survey_manager.insert_surveys(surveys).await;
     }
 
     pub async fn transfer_cargo(&self) {
@@ -625,7 +621,7 @@ impl ShipController {
                 .map(|g| (g.symbol.clone(), g.units))
                 .collect()
         };
-        self.agent_controller
+        self.ctx
             .cargo_broker
             .transfer_cargo(&self.ship_symbol, &self.waypoint(), cargo)
             .await;
@@ -635,7 +631,7 @@ impl ShipController {
         self.orbit().await;
         assert!(!self.is_in_transit(), "Ship is in transit");
         let space = self.cargo_space_available();
-        self.agent_controller
+        self.ctx
             .cargo_broker
             .receive_cargo(&self.ship_symbol, &self.waypoint(), space)
             .await;
@@ -654,6 +650,7 @@ impl ShipController {
             siphon,
             events,
         } = self
+            .ctx
             .api_client
             .post::<Data<SiphonResponse>, _>(&uri, &body)
             .await
@@ -675,6 +672,7 @@ impl ShipController {
         let req_body = &survey.survey;
 
         let (code, resp_body): (StatusCode, Result<String, String>) = self
+            .ctx
             .api_client
             .request_string(Method::POST, &uri, Some(req_body))
             .await;
@@ -706,17 +704,10 @@ impl ShipController {
                     self.debug(
                         "Extraction failed: Target signature is no longer in range or valid",
                     );
-                    self.agent_controller
-                        .survey_manager
-                        .remove_survey(survey)
-                        .await;
+                    self.ctx.survey_manager.remove_survey(survey).await;
                 } else if code == 4224 {
-                    // Request failed: 409 Err("{\"error\":{\"message\":\"Ship extract failed. Survey X1-FM95-CD5Z-BEC3E1 has been exhausted.\",\"code\":4224}}")
                     self.debug("Extraction failed: Survey has been exhausted");
-                    self.agent_controller
-                        .survey_manager
-                        .remove_survey(survey)
-                        .await;
+                    self.ctx.survey_manager.remove_survey(survey).await;
                 } else {
                     panic!(
                         "Request failed: {} {} {}\nbody: {:?}",
@@ -749,6 +740,7 @@ impl ShipController {
         self.debug("Scrapping Ship");
         let uri = format!("/my/ships/{}/scrap", self.ship_symbol);
         let ScrapResponse { agent, transaction } = self
+            .ctx
             .api_client
             .post::<Data<ScrapResponse>, _>(&uri, &json!({}))
             .await
@@ -757,7 +749,7 @@ impl ShipController {
             "{} Scrapped ship for ${}",
             self.ship_symbol, transaction.total_price
         );
-        self.agent_controller.update_agent(agent);
+        self.ctx.update_agent(agent);
     }
 
     pub fn handle_ship_condition_events(&self, events: &Vec<ShipConditionEvent>) {
@@ -770,7 +762,6 @@ impl ShipController {
     }
 
     pub fn set_state_description(&self, desc: &str) {
-        self.agent_controller
-            .set_state_description(&self.ship_symbol, desc)
+        self.ctx.set_state_description(&self.ship_symbol, desc);
     }
 }

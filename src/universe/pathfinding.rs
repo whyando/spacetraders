@@ -1,10 +1,19 @@
 use super::Universe;
-use crate::models::{SystemSymbol, WaypointSymbol};
+use crate::api_client::api_models::WaypointDetailed;
+use crate::models::{ShipFlightMode, SystemSymbol, WaypointSymbol};
+use crate::util;
 use log::*;
 use quadtree_rs::area::AreaBuilder;
 use quadtree_rs::{Quadtree, point::Point};
 use std::cmp::max;
 use std::collections::BTreeMap;
+
+pub struct NavEdge {
+    pub flight_mode: ShipFlightMode,
+    pub fuel_cost: i64,
+    pub distance: i64,
+    pub duration: i64,
+}
 
 pub struct JumpGate {
     pub active_connections: Vec<(WaypointSymbol, i64)>,
@@ -218,4 +227,92 @@ impl Universe {
 
         warp_graph
     }
+}
+
+// Returns a matrix between market waypoints. Assumes we can refuel at any waypoint.
+// Weights are the travel duration in seconds between two waypoints
+// Preferring BURN flight mode, and only CRUISE if the fuel capacity isn't high enough
+pub fn market_adjacency_edges(
+    market_waypoints: &[WaypointDetailed],
+    ship_max_fuel: i64,
+    ship_speed: i64,
+) -> Vec<BTreeMap<usize, NavEdge>> {
+    let mut edges = Vec::new();
+    for w1 in market_waypoints.iter() {
+        let mut row = BTreeMap::new();
+        for (j, w2) in market_waypoints.iter().enumerate() {
+            let dist = util::distance(w1, w2);
+            let burn_fuel = util::fuel_cost(&ShipFlightMode::Burn, dist);
+            let cruise_fuel = util::fuel_cost(&ShipFlightMode::Cruise, dist);
+            if burn_fuel <= ship_max_fuel {
+                row.insert(
+                    j,
+                    NavEdge {
+                        flight_mode: ShipFlightMode::Burn,
+                        fuel_cost: burn_fuel,
+                        distance: dist,
+                        duration: util::estimated_travel_duration(
+                            &ShipFlightMode::Burn,
+                            ship_speed,
+                            dist,
+                        ),
+                    },
+                );
+            } else if cruise_fuel <= ship_max_fuel {
+                row.insert(
+                    j,
+                    NavEdge {
+                        flight_mode: ShipFlightMode::Cruise,
+                        fuel_cost: cruise_fuel,
+                        distance: dist,
+                        duration: util::estimated_travel_duration(
+                            &ShipFlightMode::Cruise,
+                            ship_speed,
+                            dist,
+                        ),
+                    },
+                );
+            }
+        }
+        edges.push(row);
+    }
+    assert_eq!(edges.len(), market_waypoints.len());
+    edges
+}
+
+pub fn full_travel_matrix(
+    market_waypoints: &[WaypointDetailed],
+    ship_max_fuel: i64,
+    ship_speed: i64,
+) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
+    let mut durations: Vec<Vec<f64>> =
+        vec![vec![0.; market_waypoints.len()]; market_waypoints.len()];
+    let mut distances: Vec<Vec<f64>> =
+        vec![vec![0.; market_waypoints.len()]; market_waypoints.len()];
+    let edges = market_adjacency_edges(market_waypoints, ship_max_fuel, ship_speed);
+    for i in 0..market_waypoints.len() {
+        for j in 0..market_waypoints.len() {
+            if i == j {
+                durations[i][j] = 0.;
+                distances[i][j] = 0.;
+            } else if let Some(edge) = edges[i].get(&j) {
+                durations[i][j] = edge.duration as f64;
+                distances[i][j] = edge.distance as f64;
+            } else {
+                durations[i][j] = f64::INFINITY;
+                distances[i][j] = f64::INFINITY;
+            }
+        }
+    }
+
+    // Fill in the rest of the matrix with floyd warshall
+    for k in 0..market_waypoints.len() {
+        for i in 0..market_waypoints.len() {
+            for j in 0..market_waypoints.len() {
+                durations[i][j] = durations[i][j].min(durations[i][k] + durations[k][j]);
+                distances[i][j] = distances[i][j].min(distances[i][k] + distances[k][j]);
+            }
+        }
+    }
+    (durations, distances)
 }

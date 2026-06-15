@@ -666,6 +666,7 @@ impl LogisticTaskManager {
             .generate_task_list(system_symbol, cargo_capacity, true, config.min_profit)
             .await;
         self.agent_controller()
+            .ctx
             .ledger
             .reserve_credits(ship_symbol, 5000 * cargo_capacity);
 
@@ -696,10 +697,12 @@ impl LogisticTaskManager {
             .into_iter()
             .filter(|w| w.is_market())
             .collect::<Vec<_>>();
-        let (duration_matrix, distance_matrix) = self
-            .universe
-            .full_travel_matrix(&market_waypoints, fuel_capacity, engine_speed)
-            .await;
+        let (duration_matrix, distance_matrix) =
+            crate::universe::pathfinding::full_travel_matrix(
+                &market_waypoints,
+                fuel_capacity,
+                engine_speed,
+            );
         let logistics_ship = LogisticShip {
             symbol: ship_symbol.to_string(),
             capacity: cargo_capacity,
