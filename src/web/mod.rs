@@ -9,6 +9,7 @@ use crate::models::ShipNavStatus;
 use axum::{Json, Router, extract::State, response::Html, routing::get};
 use log::*;
 use serde::Serialize;
+use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Clone)]
 struct AppState {
@@ -18,11 +19,16 @@ struct AppState {
 
 pub async fn serve(controller: AgentController, db: DbClient, port: u16) {
     let state = AppState { controller, db };
+    // Public read-only API consumed cross-origin by the static dashboard (GitHub Pages).
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([axum::http::Method::GET]);
     let app = Router::new()
         .route("/", get(index))
         .route("/api/agent", get(api_agent))
         .route("/api/ships", get(api_ships))
         .route("/api/history", get(api_history))
+        .layer(cors)
         .with_state(state);
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
