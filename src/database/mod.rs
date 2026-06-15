@@ -36,6 +36,31 @@ pub struct DbClient {
     db: Pool<AsyncPgConnection>,
 }
 
+// A single KPI snapshot from agent_metrics (used to chart the equity curve & fleet size).
+pub struct MetricsPoint {
+    pub ts: chrono::DateTime<Utc>,
+    pub credits: i64,
+    pub net_worth: i64,
+    pub num_ships: i32,
+}
+
+// Aggregated market trading result for one trade good.
+#[derive(QueryableByName, Serialize)]
+pub struct GoodProfit {
+    #[diesel(sql_type = Text)]
+    pub symbol: String,
+    #[diesel(sql_type = BigInt)]
+    pub revenue: i64,
+    #[diesel(sql_type = BigInt)]
+    pub cost: i64,
+    #[diesel(sql_type = BigInt)]
+    pub profit: i64,
+    #[diesel(sql_type = BigInt)]
+    pub units_bought: i64,
+    #[diesel(sql_type = BigInt)]
+    pub units_sold: i64,
+}
+
 impl DbClient {
     pub async fn new(slice_id: &str) -> DbClient {
         let database_url = std::env::var("POSTGRES_URI").expect("POSTGRES_URI must be set");
@@ -323,13 +348,14 @@ impl DbClient {
             .expect("DB Query error");
     }
 
-    // Recent KPI history (ascending by ts) for charting credits / net worth.
-    pub async fn get_metrics_history(&self, limit: i64) -> Vec<(chrono::DateTime<Utc>, i64, i64)> {
-        let mut rows: Vec<(chrono::DateTime<Utc>, i64, i64)> = agent_metrics::table
+    // Recent KPI history (ascending by ts) for charting the equity curve and fleet size.
+    pub async fn get_metrics_history(&self, limit: i64) -> Vec<MetricsPoint> {
+        let mut rows: Vec<(chrono::DateTime<Utc>, i64, i64, i32)> = agent_metrics::table
             .select((
                 agent_metrics::ts,
                 agent_metrics::credits,
                 agent_metrics::net_worth,
+                agent_metrics::num_ships,
             ))
             .order(agent_metrics::ts.desc())
             .limit(limit)
@@ -337,7 +363,46 @@ impl DbClient {
             .await
             .expect("DB Query error");
         rows.reverse();
-        rows
+        rows.into_iter()
+            .map(|(ts, credits, net_worth, num_ships)| MetricsPoint {
+                ts,
+                credits,
+                net_worth,
+                num_ships,
+            })
+            .collect()
+    }
+
+    // Ship-purchase cash events (ascending by ts), amounts returned as positive spend.
+    pub async fn ship_spend_events(&self) -> Vec<(chrono::DateTime<Utc>, i64)> {
+        let rows: Vec<(chrono::DateTime<Utc>, i64)> = agent_transaction_log::table
+            .filter(agent_transaction_log::type_.eq("ship_purchase"))
+            .select((agent_transaction_log::ts, agent_transaction_log::amount))
+            .order(agent_transaction_log::ts.asc())
+            .load(&mut self.conn().await)
+            .await
+            .expect("DB Query error");
+        // stored amounts are negative (credits out); flip to positive spend
+        rows.into_iter().map(|(ts, amount)| (ts, -amount)).collect()
+    }
+
+    // Realised market trading profit grouped by trade good (revenue - cost), best first.
+    pub async fn profit_by_good(&self) -> Vec<GoodProfit> {
+        diesel::sql_query(
+            "SELECT symbol, \
+             COALESCE(SUM(total_price) FILTER (WHERE type = 'SELL'), 0)::bigint AS revenue, \
+             COALESCE(SUM(total_price) FILTER (WHERE type = 'PURCHASE'), 0)::bigint AS cost, \
+             (COALESCE(SUM(total_price) FILTER (WHERE type = 'SELL'), 0) \
+              - COALESCE(SUM(total_price) FILTER (WHERE type = 'PURCHASE'), 0))::bigint AS profit, \
+             COALESCE(SUM(units) FILTER (WHERE type = 'PURCHASE'), 0)::bigint AS units_bought, \
+             COALESCE(SUM(units) FILTER (WHERE type = 'SELL'), 0)::bigint AS units_sold \
+             FROM market_transaction_log \
+             GROUP BY symbol \
+             ORDER BY profit DESC",
+        )
+        .get_results(&mut self.conn().await)
+        .await
+        .expect("DB Query error")
     }
 
     // Log a non-market cash event (amount signed: negative = credits out).
