@@ -80,4 +80,13 @@ impl Ledger {
             })
             .sum()
     }
+
+    // Total value of goods currently held across the fleet (in-transit cargo)
+    pub fn cargo_value(&self) -> i64 {
+        let ships = self.ships.lock().unwrap();
+        ships
+            .values()
+            .map(|s| s.goods.values().map(|(_, v)| v).sum::<i64>())
+            .sum()
+    }
 }

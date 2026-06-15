@@ -295,6 +295,32 @@ impl DbClient {
             .expect("DB Query error");
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_agent_metrics(
+        &self,
+        ts: chrono::DateTime<Utc>,
+        credits: i64,
+        available_credits: i64,
+        reserved_credits: i64,
+        cargo_value: i64,
+        num_ships: i32,
+    ) {
+        diesel::insert_into(agent_metrics::table)
+            .values((
+                agent_metrics::ts.eq(ts),
+                agent_metrics::credits.eq(credits),
+                agent_metrics::available_credits.eq(available_credits),
+                agent_metrics::reserved_credits.eq(reserved_credits),
+                agent_metrics::cargo_value.eq(cargo_value),
+                agent_metrics::num_ships.eq(num_ships),
+            ))
+            .on_conflict(agent_metrics::ts)
+            .do_nothing()
+            .execute(&mut self.conn().await)
+            .await
+            .expect("DB Query error");
+    }
+
     // Shouldn't be needed, since we shouldn't be loading individual shipyards
     // pub async fn get_shipyard(&self, symbol: &WaypointSymbol) -> Option<WithTimestamp<Shipyard>> {
     //     let shipyard: Option<db_models::Shipyard> = shipyards::table

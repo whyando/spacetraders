@@ -3,7 +3,7 @@ replicaCount: 1
 image:
   repository: registry.whyando.com/whyando/spacetraders
   pullPolicy: IfNotPresent
-  tag: "0.5.5"
+  tag: "0.5.7"
 
 imagePullSecrets: []
 nameOverride: ""

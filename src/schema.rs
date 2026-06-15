@@ -1,6 +1,17 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    agent_metrics (ts) {
+        ts -> Timestamptz,
+        credits -> Int8,
+        available_credits -> Int8,
+        reserved_credits -> Int8,
+        cargo_value -> Int8,
+        num_ships -> Int4,
+    }
+}
+
+diesel::table! {
     generic_lookup (key) {
         key -> Text,
         value -> Json,
@@ -120,6 +131,7 @@ diesel::table! {
 }
 
 diesel::allow_tables_to_appear_in_same_query!(
+    agent_metrics,
     generic_lookup,
     jumpgate_connections,
     market_transaction_log,

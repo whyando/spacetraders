@@ -1,6 +1,9 @@
 -- Create schema
 CREATE SCHEMA IF NOT EXISTS ___SCHEMA___;
 
+-- TimescaleDB (database-level, idempotent)
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
 -- generic_lookup
 CREATE TABLE IF NOT EXISTS ___SCHEMA___.generic_lookup (
     key text NOT NULL,
@@ -119,3 +122,16 @@ CREATE TABLE IF NOT EXISTS ___SCHEMA___.shipyards (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+
+-- agent_metrics (time-series KPI snapshots; one agent per schema)
+CREATE TABLE IF NOT EXISTS ___SCHEMA___.agent_metrics (
+    ts                timestamptz NOT NULL,
+    credits           bigint      NOT NULL,
+    available_credits bigint      NOT NULL,
+    reserved_credits  bigint      NOT NULL,
+    cargo_value       bigint      NOT NULL,
+    num_ships         integer     NOT NULL,
+    PRIMARY KEY (ts)
+);
+-- create_hypertable lives in public; the app pins search_path to the slice schema, so qualify it.
+SELECT public.create_hypertable('___SCHEMA___.agent_metrics', 'ts', if_not_exists => TRUE);

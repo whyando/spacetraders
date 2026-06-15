@@ -7,6 +7,7 @@ use super::ledger::Ledger;
 use crate::broker::CargoBroker;
 use crate::models::*;
 use crate::survey_manager::SurveyManager;
+use chrono::Utc;
 use crate::{
     api_client::ApiClient,
     database::DbClient,
@@ -277,6 +278,7 @@ impl AgentController {
 
     async fn controller_tick(&self) {
         debug!("controller_tick");
+        self.record_metrics().await;
         self.fleet.check_era_advance().await;
         let (bought, _shipyard_task_waypoint) = self.fleet.try_buy_ships(None).await;
         for ship_symbol in bought {
@@ -284,6 +286,21 @@ impl AgentController {
             self.fleet.spawn_run_ship(self, ship_symbol).await;
         }
         self.contract_tick(true).await;
+    }
+
+    // Append a KPI snapshot for time-series analysis (equity curve, fleet size).
+    async fn record_metrics(&self) {
+        self.ctx
+            .db
+            .insert_agent_metrics(
+                Utc::now(),
+                self.ctx.ledger.credits(),
+                self.ctx.ledger.available_credits(),
+                self.ctx.ledger.effective_reserved_credits(),
+                self.ctx.ledger.cargo_value(),
+                self.num_ships() as i32,
+            )
+            .await;
     }
 
     // Exploration delegation methods
