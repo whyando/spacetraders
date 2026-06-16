@@ -172,6 +172,11 @@ impl Universe {
             None => {
                 let site = self.api_client.get_construction(symbol).await;
                 self.db.save_construction(symbol, &site).await;
+                // Seed the progress log so freshly-deployed agents have a baseline
+                // (the dedup in insert_construction_snapshot handles re-fetches).
+                if let Some(c) = &site.data {
+                    Self::record_construction_snapshot(&self.db, c, site.timestamp).await;
+                }
                 site
             }
         }
@@ -195,13 +200,29 @@ impl Universe {
 
     pub async fn update_construction(&self, construction: &Construction) {
         let symbol = &construction.symbol;
-        let construction = WithTimestamp {
+        let ts = chrono::Utc::now();
+        let with_ts = WithTimestamp {
             data: Some(construction.clone()),
-            timestamp: chrono::Utc::now(),
+            timestamp: ts,
         };
         self.constructions
-            .insert(symbol.clone(), Arc::new(construction.clone()));
-        self.db.save_construction(symbol, &construction).await;
+            .insert(symbol.clone(), Arc::new(with_ts.clone()));
+        self.db.save_construction(symbol, &with_ts).await;
+        Self::record_construction_snapshot(&self.db, construction, ts).await;
+    }
+
+    async fn record_construction_snapshot(
+        db: &crate::database::DbClient,
+        construction: &Construction,
+        ts: chrono::DateTime<chrono::Utc>,
+    ) {
+        let materials: Vec<(String, i32, i32)> = construction
+            .materials
+            .iter()
+            .map(|m| (m.trade_symbol.clone(), m.fulfilled as i32, m.required as i32))
+            .collect();
+        db.insert_construction_snapshot(ts, &construction.symbol, &materials)
+            .await;
     }
 
     pub fn get_faction(&self, faction: &str) -> Faction {

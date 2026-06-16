@@ -151,3 +151,15 @@ CREATE TABLE IF NOT EXISTS ___SCHEMA___.agent_transaction_log (
     PRIMARY KEY (id, ts)
 );
 SELECT public.create_hypertable('___SCHEMA___.agent_transaction_log', 'ts', if_not_exists => TRUE);
+
+-- construction_log (per-material fulfilled/required snapshots; one row per material per snapshot)
+CREATE TABLE IF NOT EXISTS ___SCHEMA___.construction_log (
+    ts           timestamptz NOT NULL,
+    waypoint     text        NOT NULL,
+    trade_symbol text        NOT NULL,
+    fulfilled    integer     NOT NULL,
+    required     integer     NOT NULL,
+    PRIMARY KEY (ts, waypoint, trade_symbol)
+);
+SELECT public.create_hypertable('___SCHEMA___.construction_log', 'ts', if_not_exists => TRUE);
+CREATE INDEX IF NOT EXISTS construction_log_lookup ON ___SCHEMA___.construction_log (waypoint, trade_symbol, ts);

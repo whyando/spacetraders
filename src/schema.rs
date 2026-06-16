@@ -25,6 +25,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    construction_log (ts, waypoint, trade_symbol) {
+        ts -> Timestamptz,
+        waypoint -> Text,
+        trade_symbol -> Text,
+        fulfilled -> Int4,
+        required -> Int4,
+    }
+}
+
+diesel::table! {
     generic_lookup (key) {
         key -> Text,
         value -> Json,
@@ -146,6 +156,7 @@ diesel::table! {
 diesel::allow_tables_to_appear_in_same_query!(
     agent_metrics,
     agent_transaction_log,
+    construction_log,
     generic_lookup,
     jumpgate_connections,
     market_transaction_log,

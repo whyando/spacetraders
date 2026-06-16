@@ -537,6 +537,132 @@ impl DbClient {
         self.set_value(&key, construction).await
     }
 
+    // Append a snapshot of a construction site's per-material progress.
+    // Skips materials whose latest stored `fulfilled` matches the new value, so the
+    // log stays a strict change log even when callers snapshot opportunistically.
+    pub async fn insert_construction_snapshot(
+        &self,
+        ts: chrono::DateTime<Utc>,
+        waypoint: &WaypointSymbol,
+        materials: &[(String, i32, i32)],
+    ) {
+        if materials.is_empty() {
+            return;
+        }
+        let waypoint_s = waypoint.to_string();
+        let mut conn = self.conn().await;
+        #[derive(QueryableByName)]
+        struct LatestRow {
+            #[diesel(sql_type = Text)]
+            trade_symbol: String,
+            #[diesel(sql_type = Integer)]
+            fulfilled: i32,
+        }
+        // Latest fulfilled per material for dedup.
+        let latest: Vec<LatestRow> = diesel::sql_query(
+            "SELECT DISTINCT ON (trade_symbol) trade_symbol, fulfilled \
+             FROM construction_log WHERE waypoint = $1 \
+             ORDER BY trade_symbol, ts DESC",
+        )
+        .bind::<Text, _>(&waypoint_s)
+        .get_results(&mut conn)
+        .await
+        .expect("DB Query error");
+        let mut latest_map: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
+        for r in latest {
+            latest_map.insert(r.trade_symbol, r.fulfilled);
+        }
+        let inserts: Vec<_> = materials
+            .iter()
+            .filter(|(s, f, _)| latest_map.get(s) != Some(f))
+            .map(|(s, f, r)| {
+                (
+                    construction_log::ts.eq(ts),
+                    construction_log::waypoint.eq(&waypoint_s),
+                    construction_log::trade_symbol.eq(s),
+                    construction_log::fulfilled.eq(*f),
+                    construction_log::required.eq(*r),
+                )
+            })
+            .collect();
+        if inserts.is_empty() {
+            return;
+        }
+        diesel::insert_into(construction_log::table)
+            .values(inserts)
+            .on_conflict_do_nothing()
+            .execute(&mut conn)
+            .await
+            .expect("DB Insert error");
+    }
+
+    // Per-material fulfilment history for a construction site, ascending by ts.
+    pub async fn get_construction_history(
+        &self,
+        waypoint: &WaypointSymbol,
+    ) -> Vec<(chrono::DateTime<Utc>, String, i32, i32)> {
+        construction_log::table
+            .filter(construction_log::waypoint.eq(waypoint.to_string()))
+            .select((
+                construction_log::ts,
+                construction_log::trade_symbol,
+                construction_log::fulfilled,
+                construction_log::required,
+            ))
+            .order((
+                construction_log::trade_symbol.asc(),
+                construction_log::ts.asc(),
+            ))
+            .load(&mut self.conn().await)
+            .await
+            .expect("DB Query error")
+    }
+
+    // Distinct waypoints that have any construction-progress snapshots.
+    pub async fn construction_waypoints(&self) -> Vec<String> {
+        #[derive(QueryableByName)]
+        struct WpRow {
+            #[diesel(sql_type = Text)]
+            waypoint: String,
+        }
+        let rows: Vec<WpRow> = diesel::sql_query(
+            "SELECT DISTINCT waypoint FROM construction_log ORDER BY waypoint",
+        )
+        .get_results(&mut self.conn().await)
+        .await
+        .expect("DB Query error");
+        rows.into_iter().map(|r| r.waypoint).collect()
+    }
+
+    // Net credits spent on the listed trade goods at markets (PURCHASE - SELL).
+    // Construction haulers shouldn't sell these, so SELL is normally zero; subtracting
+    // it keeps the figure honest if mining ever offloads the same symbol.
+    pub async fn market_net_spend_by_good(&self, symbols: &[String]) -> Vec<(String, i64)> {
+        if symbols.is_empty() {
+            return vec![];
+        }
+        #[derive(QueryableByName)]
+        struct Row {
+            #[diesel(sql_type = Text)]
+            symbol: String,
+            #[diesel(sql_type = BigInt)]
+            net_spend: i64,
+        }
+        let rows: Vec<Row> = diesel::sql_query(
+            "SELECT symbol, \
+             (COALESCE(SUM(total_price) FILTER (WHERE type = 'PURCHASE'), 0) \
+              - COALESCE(SUM(total_price) FILTER (WHERE type = 'SELL'), 0))::bigint AS net_spend \
+             FROM market_transaction_log \
+             WHERE symbol = ANY($1) \
+             GROUP BY symbol",
+        )
+        .bind::<diesel::sql_types::Array<Text>, _>(symbols)
+        .get_results(&mut self.conn().await)
+        .await
+        .expect("DB Query error");
+        rows.into_iter().map(|r| (r.symbol, r.net_spend)).collect()
+    }
+
     pub async fn get_probe_jumpgate_reservations(
         &self,
         callsign: &str,
