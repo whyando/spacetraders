@@ -82,6 +82,9 @@ struct ShipView {
     role: String,
     status: String,
     frame: String,
+    // Resolved shipyard purchase type (e.g. SHIP_LIGHT_HAULER). Falls back to
+    // the frame symbol if the ship's config doesn't match a known model.
+    ship_type: String,
     nav_status: ShipNavStatus,
     system: String,
     waypoint: String,
@@ -96,18 +99,22 @@ async fn api_ships(State(s): State<AppState>) -> Json<Vec<ShipView>> {
         .controller
         .ships()
         .into_iter()
-        .map(|(symbol, ship, role, descr)| ShipView {
-            symbol,
-            role,
-            status: descr,
-            frame: ship.frame.name,
-            nav_status: ship.nav.status,
-            system: ship.nav.system_symbol.to_string(),
-            waypoint: ship.nav.waypoint_symbol.to_string(),
-            fuel_current: ship.fuel.current,
-            fuel_capacity: ship.fuel.capacity,
-            cargo_units: ship.cargo.units,
-            cargo_capacity: ship.cargo.capacity,
+        .map(|(symbol, ship, role, descr)| {
+            let ship_type = ship.model().unwrap_or_else(|_| ship.frame.symbol.clone());
+            ShipView {
+                symbol,
+                role,
+                status: descr,
+                frame: ship.frame.name,
+                ship_type,
+                nav_status: ship.nav.status,
+                system: ship.nav.system_symbol.to_string(),
+                waypoint: ship.nav.waypoint_symbol.to_string(),
+                fuel_current: ship.fuel.current,
+                fuel_capacity: ship.fuel.capacity,
+                cargo_units: ship.cargo.units,
+                cargo_capacity: ship.cargo.capacity,
+            }
         })
         .collect();
     ships.sort_by(|a, b| a.symbol.cmp(&b.symbol));
