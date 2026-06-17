@@ -663,6 +663,31 @@ impl DbClient {
         rows.into_iter().map(|r| (r.symbol, r.net_spend)).collect()
     }
 
+    // Cash flow events for any market transaction whose trade good is a known
+    // construction material (positive = credits out for a purchase, negative =
+    // credits in for a sell). Used to back the gate-donation correction on the
+    // dashboard's Total Profit line.
+    pub async fn construction_spend_events(&self) -> Vec<(chrono::DateTime<Utc>, i64)> {
+        #[derive(QueryableByName)]
+        struct Row {
+            #[diesel(sql_type = diesel::sql_types::Timestamptz)]
+            ts: chrono::DateTime<Utc>,
+            #[diesel(sql_type = BigInt)]
+            amount: i64,
+        }
+        let rows: Vec<Row> = diesel::sql_query(
+            "SELECT mt.timestamp AS ts, \
+             (CASE WHEN mt.type='PURCHASE' THEN mt.total_price ELSE -mt.total_price END)::bigint AS amount \
+             FROM market_transaction_log mt \
+             WHERE mt.symbol IN (SELECT DISTINCT trade_symbol FROM construction_log) \
+             ORDER BY mt.timestamp ASC",
+        )
+        .get_results(&mut self.conn().await)
+        .await
+        .expect("DB Query error");
+        rows.into_iter().map(|r| (r.ts, r.amount)).collect()
+    }
+
     pub async fn get_probe_jumpgate_reservations(
         &self,
         callsign: &str,

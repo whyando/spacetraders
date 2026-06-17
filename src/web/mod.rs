@@ -122,31 +122,42 @@ struct HistoryPoint {
     num_ships: i32,
     // cumulative credits spent on ships up to this point
     ship_spend: i64,
-    // cumulative all-time profit (net_worth at this point minus the first observed net_worth)
+    // cumulative net credits spent on construction materials up to this point
+    construction_spend: i64,
+    // (net_worth - baseline) + cumulative construction spend, so jump-gate
+    // donations don't appear as losses on the chart
     total_profit: i64,
 }
 
 async fn api_history(State(s): State<AppState>) -> Json<Vec<HistoryPoint>> {
     let metrics = s.db.get_metrics_history(5000).await;
-    let spend = s.db.ship_spend_events().await;
+    let ship_spend_events = s.db.ship_spend_events().await;
+    let construction_events = s.db.construction_spend_events().await;
     let baseline = metrics.first().map(|m| m.net_worth).unwrap_or(0);
-    // Walk both ascending series together, accumulating ship spend onto the metrics timeline.
-    let mut spend_idx = 0;
-    let mut cumulative_spend = 0i64;
+    // Walk all ascending series together, accumulating onto the metrics timeline.
+    let mut ship_idx = 0;
+    let mut cumulative_ship_spend = 0i64;
+    let mut cons_idx = 0;
+    let mut cumulative_construction_spend = 0i64;
     let points = metrics
         .into_iter()
         .map(|m| {
-            while spend_idx < spend.len() && spend[spend_idx].0 <= m.ts {
-                cumulative_spend += spend[spend_idx].1;
-                spend_idx += 1;
+            while ship_idx < ship_spend_events.len() && ship_spend_events[ship_idx].0 <= m.ts {
+                cumulative_ship_spend += ship_spend_events[ship_idx].1;
+                ship_idx += 1;
+            }
+            while cons_idx < construction_events.len() && construction_events[cons_idx].0 <= m.ts {
+                cumulative_construction_spend += construction_events[cons_idx].1;
+                cons_idx += 1;
             }
             HistoryPoint {
                 ts: m.ts.to_rfc3339(),
                 credits: m.credits,
                 net_worth: m.net_worth,
                 num_ships: m.num_ships,
-                ship_spend: cumulative_spend,
-                total_profit: m.net_worth - baseline,
+                ship_spend: cumulative_ship_spend,
+                construction_spend: cumulative_construction_spend,
+                total_profit: (m.net_worth - baseline) + cumulative_construction_spend,
             }
         })
         .collect();
