@@ -80,9 +80,15 @@ impl Universe {
         let remote_shipyards = load_remote_shipyards(&db).await;
         let markets = load_markets(&db).await;
         let shipyards = load_shipyards(&db).await;
-        // If we've already bulk-loaded the galaxy this reset, start ready.
+        // Ready only once both phases are done: systems bulk-loaded AND gate-system
+        // waypoint details (construction status) fetched.
         let galaxy_loaded = db.get_value::<bool>("galaxy_loaded").await.unwrap_or(false);
-        let (systems_ready, _) = tokio::sync::watch::channel(galaxy_loaded);
+        let gate_waypoints_loaded = db
+            .get_value::<bool>("gate_waypoints_loaded")
+            .await
+            .unwrap_or(false);
+        let (systems_ready, _) =
+            tokio::sync::watch::channel(galaxy_loaded && gate_waypoints_loaded);
         Self {
             api_client: api_client.clone(),
             db: db.clone(),
@@ -115,18 +121,31 @@ impl Universe {
         }
     }
 
-    // Kick off a one-time background load of every system in the galaxy. No-op if
-    // it's already been done this reset.
+    // Kick off the one-time background load: bulk-load every system, then fetch
+    // waypoint details for jumpgate systems. Each phase is marker-guarded, so an
+    // upgrade that only adds the second phase still runs it.
     pub fn spawn_galaxy_load(self: &Arc<Self>) {
         if *self.systems_ready.borrow() {
             return;
         }
         let this = self.clone();
         tokio::spawn(async move {
-            this.load_all_systems().await;
-            this.db.set_value("galaxy_loaded", &true).await;
+            if !this.db.get_value::<bool>("galaxy_loaded").await.unwrap_or(false) {
+                this.load_all_systems().await;
+                this.db.set_value("galaxy_loaded", &true).await;
+                info!("Galaxy load complete: {} systems", this.num_systems());
+            }
+            if !this
+                .db
+                .get_value::<bool>("gate_waypoints_loaded")
+                .await
+                .unwrap_or(false)
+            {
+                this.load_gate_waypoints().await;
+                this.db.set_value("gate_waypoints_loaded", &true).await;
+            }
             let _ = this.systems_ready.send(true);
-            info!("Galaxy load complete: {} systems", this.num_systems());
+            info!("Systems ready (galaxy + gate waypoints loaded)");
         });
     }
 
@@ -171,10 +190,12 @@ impl Universe {
         for (symbol, system) in fresh {
             self.systems.insert(symbol, system);
         }
+    }
 
-        // Phase 2: fetch the waypoint list for every system with a jump gate, so each
-        // gate's construction status (and market/shipyard traits) is known up front.
-        // get_system_waypoints fetches + persists details when they're missing.
+    // Fetch the waypoint list for every system with a jump gate, so each gate's
+    // construction status (and market/shipyard traits) is known up front.
+    // get_system_waypoints fetches + persists details when they're missing.
+    async fn load_gate_waypoints(&self) {
         let gate_systems: Vec<SystemSymbol> = self
             .systems()
             .into_iter()
