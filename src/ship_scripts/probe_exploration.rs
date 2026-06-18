@@ -5,21 +5,26 @@ use ExplorerState::*;
 use log::*;
 use pathfinding::directed::dijkstra::dijkstra;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
+
+// How long an idle probe waits before re-checking for newly-charted targets.
+const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 enum ExplorerState {
     Init,
     Exploring(WaypointSymbol),
-    Exit,
+    Idle,
 }
 
 pub async fn run_jumpgate_probe(ship: ShipController, ac: AgentController) {
     info!("Starting script jumpgate probe for {}", ship.symbol());
     ship.wait_for_transit().await;
 
+    // Never exit: the reachable-uncharted frontier grows as other probes chart
+    // gates, so an idle probe polls and resumes when new targets appear.
     let mut state = Init;
-
-    while state != Exit {
+    loop {
         let next_state = tick(&ship, &state, &ac).await;
         if let Some(next_state) = next_state {
             state = next_state;
@@ -44,7 +49,7 @@ async fn tick(
             ship.set_state_description(&desc);
             match target {
                 Some(target) => Some(Exploring(target)),
-                None => Some(Exit),
+                None => Some(Idle),
             }
         }
         Exploring(target_jumpgate) => {
@@ -84,8 +89,17 @@ async fn tick(
             ac.clear_probe_jumpgate_reservation(&ship.symbol()).await;
             Some(Init)
         }
-        Exit => {
-            panic!("Invalid state");
+        Idle => {
+            // Stage at the home jump gate (no-op if we're already sitting on a gate
+            // from the last charting run) so we can jump the moment a target opens up,
+            // then wait before re-checking the frontier.
+            let start_jumpgate = ship.ctx.universe.get_jumpgate(&ship.system()).await;
+            if ship.waypoint() != start_jumpgate {
+                ship.goto_waypoint(&start_jumpgate).await;
+            }
+            ship.set_state_description("Idle at jumpgate, waiting for new targets");
+            tokio::time::sleep(IDLE_POLL_INTERVAL).await;
+            Some(Init)
         }
     }
 }
