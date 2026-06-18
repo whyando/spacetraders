@@ -5,8 +5,12 @@
 
 use crate::agent_controller::AgentController;
 use crate::database::{DbClient, GoodProfit};
-use crate::models::{ShipNavStatus, WaypointSymbol};
-use axum::{Json, Router, extract::State, routing::get};
+use crate::models::{MarketTradeGood, ShipNavStatus, WaypointSymbol};
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    routing::get,
+};
 use log::*;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -30,6 +34,9 @@ pub async fn serve(controller: AgentController, db: DbClient, port: u16) {
         .route("/api/history", get(api_history))
         .route("/api/profit", get(api_profit))
         .route("/api/construction", get(api_construction))
+        .route("/api/systems", get(api_systems))
+        .route("/api/systems/{system}/markets", get(api_system_markets))
+        .route("/api/markets/{waypoint}", get(api_market))
         .layer(cors)
         .with_state(state);
 
@@ -301,4 +308,214 @@ async fn api_profit(State(s): State<AppState>) -> Json<ProfitResponse> {
     let by_good = s.db.profit_by_good().await;
     let total = by_good.iter().map(|g| g.profit).sum();
     Json(ProfitResponse { total, by_good })
+}
+
+#[derive(Serialize)]
+struct SystemSummary {
+    symbol: String,
+    num_markets: usize,
+    is_headquarters: bool,
+}
+
+// Systems that have at least one known market, HQ first then alphabetical.
+async fn api_systems(State(s): State<AppState>) -> Json<Vec<SystemSummary>> {
+    let hq = s.controller.agent().headquarters.system().to_string();
+    let markets = s.db.get_all_markets().await;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for (wp, _) in &markets {
+        *counts.entry(wp.system().to_string()).or_default() += 1;
+    }
+    let mut out: Vec<SystemSummary> = counts
+        .into_iter()
+        .map(|(symbol, num_markets)| SystemSummary {
+            is_headquarters: symbol == hq,
+            symbol,
+            num_markets,
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.is_headquarters
+            .cmp(&a.is_headquarters)
+            .then(a.symbol.cmp(&b.symbol))
+    });
+    Json(out)
+}
+
+#[derive(Serialize)]
+struct SystemMarketView {
+    waypoint: String,
+    imports: Vec<String>,
+    exports: Vec<String>,
+    exchange: Vec<String>,
+    num_goods: usize,
+}
+
+// Markets in a system, from the latest stored snapshot (no live API fetch).
+async fn api_system_markets(
+    State(s): State<AppState>,
+    Path(system): Path<String>,
+) -> Json<Vec<SystemMarketView>> {
+    let mut out: Vec<SystemMarketView> = s
+        .db
+        .get_all_markets()
+        .await
+        .into_iter()
+        .filter(|(wp, _)| wp.system().to_string() == system)
+        .map(|(wp, m)| {
+            let md = &m.data;
+            let syms = |v: &[crate::models::SymbolNameDescr]| {
+                v.iter().map(|x| x.symbol.clone()).collect::<Vec<_>>()
+            };
+            SystemMarketView {
+                waypoint: wp.to_string(),
+                imports: syms(&md.imports),
+                exports: syms(&md.exports),
+                exchange: syms(&md.exchange),
+                num_goods: md.trade_goods.len(),
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.waypoint.cmp(&b.waypoint));
+    Json(out)
+}
+
+#[derive(Serialize)]
+struct MarketSnapshotPoint {
+    ts: String,
+    supply: String,
+    activity: Option<String>,
+    trade_volume: i32,
+    purchase_price: i32,
+    sell_price: i32,
+}
+
+#[derive(Serialize)]
+struct MarketTxnPoint {
+    ts: String,
+    #[serde(rename = "type")]
+    type_: String,
+    units: i32,
+    price_per_unit: i32,
+    total_price: i32,
+}
+
+#[derive(Serialize)]
+struct MarketGoodView {
+    symbol: String,
+    // current snapshot fields (None if the good only appears in history/transactions)
+    #[serde(rename = "type")]
+    type_: Option<String>,
+    supply: Option<String>,
+    activity: Option<String>,
+    trade_volume: Option<i64>,
+    purchase_price: Option<i64>,
+    sell_price: Option<i64>,
+    history: Vec<MarketSnapshotPoint>,
+    transactions: Vec<MarketTxnPoint>,
+}
+
+#[derive(Serialize)]
+struct MarketDetailView {
+    waypoint: String,
+    system: String,
+    goods: Vec<MarketGoodView>,
+}
+
+// One market's current goods plus supply/price history and our own transactions,
+// grouped per good for charting.
+async fn api_market(
+    State(s): State<AppState>,
+    Path(waypoint): Path<String>,
+) -> Json<MarketDetailView> {
+    let wp = match WaypointSymbol::parse(&waypoint) {
+        Ok(w) => w,
+        Err(_) => {
+            return Json(MarketDetailView {
+                waypoint,
+                system: String::new(),
+                goods: vec![],
+            });
+        }
+    };
+    let system = wp.system().to_string();
+
+    // Current snapshot: in-memory cache, falling back to the stored snapshot.
+    let current_market = match s.controller.ctx.universe.get_market(&wp) {
+        Some(m) => Some(m.data.clone()),
+        None => s
+            .db
+            .get_all_markets()
+            .await
+            .into_iter()
+            .find(|(w, _)| w == &wp)
+            .map(|(_, m)| m.data),
+    };
+    let current_goods: HashMap<String, MarketTradeGood> = current_market
+        .as_ref()
+        .map(|m| {
+            m.trade_goods
+                .iter()
+                .map(|g| (g.symbol.clone(), g.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut hist_map: BTreeMap<String, Vec<MarketSnapshotPoint>> = BTreeMap::new();
+    for (ts, symbol, trade_volume, supply, activity, purchase_price, sell_price) in
+        s.db.market_price_history(&wp).await
+    {
+        hist_map.entry(symbol).or_default().push(MarketSnapshotPoint {
+            ts: ts.to_rfc3339(),
+            supply,
+            activity,
+            trade_volume,
+            purchase_price,
+            sell_price,
+        });
+    }
+
+    let mut txn_map: BTreeMap<String, Vec<MarketTxnPoint>> = BTreeMap::new();
+    for (ts, symbol, type_, units, price_per_unit, total_price) in
+        s.db.market_transactions(&wp).await
+    {
+        txn_map.entry(symbol).or_default().push(MarketTxnPoint {
+            ts: ts.to_rfc3339(),
+            type_,
+            units,
+            price_per_unit,
+            total_price,
+        });
+    }
+
+    // Union of goods seen in the snapshot, the history, and our transactions.
+    let mut symbols: BTreeSet<String> = BTreeSet::new();
+    symbols.extend(current_goods.keys().cloned());
+    symbols.extend(hist_map.keys().cloned());
+    symbols.extend(txn_map.keys().cloned());
+
+    let goods = symbols
+        .into_iter()
+        .map(|symbol| {
+            let g = current_goods.get(&symbol);
+            let history = hist_map.remove(&symbol).unwrap_or_default();
+            let transactions = txn_map.remove(&symbol).unwrap_or_default();
+            MarketGoodView {
+                type_: g.map(|g| g._type.to_string()),
+                supply: g.map(|g| g.supply.to_string()),
+                activity: g.and_then(|g| g.activity.as_ref().map(|a| a.to_string())),
+                trade_volume: g.map(|g| g.trade_volume),
+                purchase_price: g.map(|g| g.purchase_price),
+                sell_price: g.map(|g| g.sell_price),
+                history,
+                transactions,
+                symbol,
+            }
+        })
+        .collect();
+
+    Json(MarketDetailView {
+        waypoint: wp.to_string(),
+        system,
+        goods,
+    })
 }

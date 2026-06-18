@@ -28,6 +28,22 @@ CREATE TABLE IF NOT EXISTS ___SCHEMA___.market_transaction_log (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS market_transaction_log_idx ON ___SCHEMA___.market_transaction_log USING btree (market_symbol, "timestamp");
 
+-- market_trades (per-good supply/price snapshots; one row per good each time a value changes)
+CREATE TABLE IF NOT EXISTS ___SCHEMA___.market_trades (
+    "timestamp"    timestamp with time zone NOT NULL,
+    market_symbol  text    NOT NULL,
+    symbol         text    NOT NULL,
+    trade_volume   integer NOT NULL,
+    type           text    NOT NULL,
+    supply         text    NOT NULL,
+    activity       text,
+    purchase_price integer NOT NULL,
+    sell_price     integer NOT NULL,
+    PRIMARY KEY (market_symbol, symbol, "timestamp")
+);
+SELECT public.create_hypertable('___SCHEMA___.market_trades', 'timestamp', if_not_exists => TRUE);
+CREATE INDEX IF NOT EXISTS market_trades_lookup ON ___SCHEMA___.market_trades (market_symbol, symbol, "timestamp");
+
 -- jumpgate_connections
 CREATE TABLE IF NOT EXISTS ___SCHEMA___.jumpgate_connections (
     waypoint_symbol text NOT NULL,

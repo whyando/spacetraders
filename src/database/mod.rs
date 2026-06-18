@@ -18,7 +18,7 @@ use diesel::OptionalExtension as _;
 use diesel::QueryDsl as _;
 use diesel::QueryableByName;
 use diesel::SelectableHelper as _;
-use diesel::sql_types::{BigInt, Integer, Text};
+use diesel::sql_types::{BigInt, Integer, Nullable, Text};
 use diesel::upsert::excluded;
 use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl as _;
@@ -263,31 +263,140 @@ impl DbClient {
             .expect("DB Insert error");
     }
 
-    pub async fn insert_market_trades(&self, _market: &WithTimestamp<Market>) {
-        // let inserts = market
-        //     .data
-        //     .trade_goods
-        //     .iter()
-        //     .map(|trade| {
-        //         let activity = trade.activity.as_ref().map(|a| a.to_string());
-        //         (
-        //             market_trades::timestamp.eq(market.timestamp),
-        //             market_trades::market_symbol.eq(market.data.symbol.to_string()),
-        //             market_trades::symbol.eq(&trade.symbol),
-        //             market_trades::trade_volume.eq(trade.trade_volume as i32),
-        //             market_trades::type_.eq(trade._type.to_string()),
-        //             market_trades::supply.eq(trade.supply.to_string()),
-        //             market_trades::activity.eq(activity),
-        //             market_trades::purchase_price.eq(trade.purchase_price as i32),
-        //             market_trades::sell_price.eq(trade.sell_price as i32),
-        //         )
-        //     })
-        //     .collect::<Vec<_>>();
-        // diesel::insert_into(market_trades::table)
-        //     .values(&inserts)
-        //     .execute(&mut self.conn().await)
-        //     .await
-        //     .expect("DB Query error");
+    // Record a supply/price snapshot per trade good, but only for goods whose
+    // values changed since the last stored snapshot. This keeps the hypertable
+    // small (markets are re-observed constantly) and yields a clean step chart.
+    pub async fn insert_market_trades(&self, market: &WithTimestamp<Market>) {
+        let market_symbol = market.data.symbol.to_string();
+
+        // Latest stored snapshot per good for this market.
+        #[derive(QueryableByName)]
+        struct LatestRow {
+            #[diesel(sql_type = Text)]
+            symbol: String,
+            #[diesel(sql_type = Integer)]
+            trade_volume: i32,
+            #[diesel(sql_type = Text)]
+            supply: String,
+            #[diesel(sql_type = Nullable<Text>)]
+            activity: Option<String>,
+            #[diesel(sql_type = Integer)]
+            purchase_price: i32,
+            #[diesel(sql_type = Integer)]
+            sell_price: i32,
+        }
+        let latest: Vec<LatestRow> = diesel::sql_query(
+            "SELECT DISTINCT ON (symbol) symbol, trade_volume, supply, activity, \
+             purchase_price, sell_price FROM market_trades \
+             WHERE market_symbol = $1 ORDER BY symbol, \"timestamp\" DESC",
+        )
+        .bind::<Text, _>(&market_symbol)
+        .get_results(&mut self.conn().await)
+        .await
+        .expect("DB Query error");
+        let latest_map: std::collections::HashMap<String, LatestRow> =
+            latest.into_iter().map(|r| (r.symbol.clone(), r)).collect();
+
+        let changed = |trade: &crate::models::MarketTradeGood| {
+            let activity = trade.activity.as_ref().map(|a| a.to_string());
+            match latest_map.get(&trade.symbol) {
+                Some(prev) => {
+                    prev.trade_volume != trade.trade_volume as i32
+                        || prev.supply != trade.supply.to_string()
+                        || prev.activity != activity
+                        || prev.purchase_price != trade.purchase_price as i32
+                        || prev.sell_price != trade.sell_price as i32
+                }
+                None => true,
+            }
+        };
+
+        let inserts = market
+            .data
+            .trade_goods
+            .iter()
+            .filter(|trade| changed(trade))
+            .map(|trade| {
+                let activity = trade.activity.as_ref().map(|a| a.to_string());
+                (
+                    market_trades::timestamp.eq(market.timestamp),
+                    market_trades::market_symbol.eq(market.data.symbol.to_string()),
+                    market_trades::symbol.eq(&trade.symbol),
+                    market_trades::trade_volume.eq(trade.trade_volume as i32),
+                    market_trades::type_.eq(trade._type.to_string()),
+                    market_trades::supply.eq(trade.supply.to_string()),
+                    market_trades::activity.eq(activity),
+                    market_trades::purchase_price.eq(trade.purchase_price as i32),
+                    market_trades::sell_price.eq(trade.sell_price as i32),
+                )
+            })
+            .collect::<Vec<_>>();
+        if inserts.is_empty() {
+            return;
+        }
+        diesel::insert_into(market_trades::table)
+            .values(inserts)
+            .on_conflict((
+                market_trades::market_symbol,
+                market_trades::symbol,
+                market_trades::timestamp,
+            ))
+            .do_nothing()
+            .execute(&mut self.conn().await)
+            .await
+            .expect("DB Query error");
+    }
+
+    // Supply/price snapshots for a market (ascending), one row per good per change.
+    #[allow(clippy::type_complexity)]
+    pub async fn market_price_history(
+        &self,
+        market: &WaypointSymbol,
+    ) -> Vec<(
+        chrono::DateTime<Utc>,
+        String,
+        i32,
+        String,
+        Option<String>,
+        i32,
+        i32,
+    )> {
+        market_trades::table
+            .filter(market_trades::market_symbol.eq(market.to_string()))
+            .select((
+                market_trades::timestamp,
+                market_trades::symbol,
+                market_trades::trade_volume,
+                market_trades::supply,
+                market_trades::activity,
+                market_trades::purchase_price,
+                market_trades::sell_price,
+            ))
+            .order(market_trades::timestamp.asc())
+            .load(&mut self.conn().await)
+            .await
+            .expect("DB Query error")
+    }
+
+    // Our own buy/sell transactions at a market (ascending).
+    pub async fn market_transactions(
+        &self,
+        market: &WaypointSymbol,
+    ) -> Vec<(chrono::DateTime<Utc>, String, String, i32, i32, i32)> {
+        market_transaction_log::table
+            .filter(market_transaction_log::market_symbol.eq(market.to_string()))
+            .select((
+                market_transaction_log::timestamp,
+                market_transaction_log::symbol,
+                market_transaction_log::type_,
+                market_transaction_log::units,
+                market_transaction_log::price_per_unit,
+                market_transaction_log::total_price,
+            ))
+            .order(market_transaction_log::timestamp.asc())
+            .load(&mut self.conn().await)
+            .await
+            .expect("DB Query error")
     }
 
     pub async fn upsert_market_transactions(&self, market: &WithTimestamp<Market>) {

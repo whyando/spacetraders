@@ -69,6 +69,21 @@ diesel::table! {
 }
 
 diesel::table! {
+    market_trades (market_symbol, symbol, timestamp) {
+        timestamp -> Timestamptz,
+        market_symbol -> Text,
+        symbol -> Text,
+        trade_volume -> Int4,
+        #[sql_name = "type"]
+        type_ -> Text,
+        supply -> Text,
+        activity -> Nullable<Text>,
+        purchase_price -> Int4,
+        sell_price -> Int4,
+    }
+}
+
+diesel::table! {
     markets (waypoint_symbol) {
         waypoint_symbol -> Text,
         market_data -> Jsonb,
@@ -159,6 +174,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     construction_log,
     generic_lookup,
     jumpgate_connections,
+    market_trades,
     market_transaction_log,
     markets,
     remote_markets,
