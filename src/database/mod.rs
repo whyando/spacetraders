@@ -44,22 +44,6 @@ pub struct MetricsPoint {
     pub num_ships: i32,
 }
 
-// Aggregated market trading result for one trade good.
-#[derive(QueryableByName, Serialize)]
-pub struct GoodProfit {
-    #[diesel(sql_type = Text)]
-    pub symbol: String,
-    #[diesel(sql_type = BigInt)]
-    pub revenue: i64,
-    #[diesel(sql_type = BigInt)]
-    pub cost: i64,
-    #[diesel(sql_type = BigInt)]
-    pub profit: i64,
-    #[diesel(sql_type = BigInt)]
-    pub units_bought: i64,
-    #[diesel(sql_type = BigInt)]
-    pub units_sold: i64,
-}
 
 impl DbClient {
     pub async fn new(slice_id: &str) -> DbClient {
@@ -493,25 +477,6 @@ impl DbClient {
             .expect("DB Query error");
         // stored amounts are negative (credits out); flip to positive spend
         rows.into_iter().map(|(ts, amount)| (ts, -amount)).collect()
-    }
-
-    // Realised market trading profit grouped by trade good (revenue - cost), best first.
-    pub async fn profit_by_good(&self) -> Vec<GoodProfit> {
-        diesel::sql_query(
-            "SELECT symbol, \
-             COALESCE(SUM(total_price) FILTER (WHERE type = 'SELL'), 0)::bigint AS revenue, \
-             COALESCE(SUM(total_price) FILTER (WHERE type = 'PURCHASE'), 0)::bigint AS cost, \
-             (COALESCE(SUM(total_price) FILTER (WHERE type = 'SELL'), 0) \
-              - COALESCE(SUM(total_price) FILTER (WHERE type = 'PURCHASE'), 0))::bigint AS profit, \
-             COALESCE(SUM(units) FILTER (WHERE type = 'PURCHASE'), 0)::bigint AS units_bought, \
-             COALESCE(SUM(units) FILTER (WHERE type = 'SELL'), 0)::bigint AS units_sold \
-             FROM market_transaction_log \
-             GROUP BY symbol \
-             ORDER BY profit DESC",
-        )
-        .get_results(&mut self.conn().await)
-        .await
-        .expect("DB Query error")
     }
 
     // Log a non-market cash event (amount signed: negative = credits out).

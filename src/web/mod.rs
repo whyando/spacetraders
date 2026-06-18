@@ -4,7 +4,7 @@
 //! history. Consumed cross-origin by the standalone dashboard SPA.
 
 use crate::agent_controller::AgentController;
-use crate::database::{DbClient, GoodProfit};
+use crate::database::DbClient;
 use crate::models::{MarketTradeGood, ShipNavStatus, WaypointSymbol};
 use axum::{
     Json, Router,
@@ -32,7 +32,6 @@ pub async fn serve(controller: AgentController, db: DbClient, port: u16) {
         .route("/api/agent", get(api_agent))
         .route("/api/ships", get(api_ships))
         .route("/api/history", get(api_history))
-        .route("/api/profit", get(api_profit))
         .route("/api/construction", get(api_construction))
         .route("/api/systems", get(api_systems))
         .route("/api/systems/{system}/markets", get(api_system_markets))
@@ -295,19 +294,6 @@ async fn api_construction(State(s): State<AppState>) -> Json<Vec<ConstructionSit
         });
     }
     Json(sites)
-}
-
-#[derive(Serialize)]
-struct ProfitResponse {
-    // sum of per-good profit (realised market trading profit)
-    total: i64,
-    by_good: Vec<GoodProfit>,
-}
-
-async fn api_profit(State(s): State<AppState>) -> Json<ProfitResponse> {
-    let by_good = s.db.profit_by_good().await;
-    let total = by_good.iter().map(|g| g.profit).sum();
-    Json(ProfitResponse { total, by_good })
 }
 
 #[derive(Serialize)]
