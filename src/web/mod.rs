@@ -99,6 +99,9 @@ struct ShipView {
     nav_status: ShipNavStatus,
     system: String,
     waypoint: String,
+    // current nav route's destination + arrival (meaningful while IN_TRANSIT)
+    destination: String,
+    arrival: String,
     fuel_current: i64,
     fuel_capacity: i64,
     cargo_units: i64,
@@ -121,6 +124,8 @@ async fn api_ships(State(s): State<AppState>) -> Json<Vec<ShipView>> {
                 nav_status: ship.nav.status,
                 system: ship.nav.system_symbol.to_string(),
                 waypoint: ship.nav.waypoint_symbol.to_string(),
+                destination: ship.nav.route.destination.symbol.to_string(),
+                arrival: ship.nav.route.arrival.to_rfc3339(),
                 fuel_current: ship.fuel.current,
                 fuel_capacity: ship.fuel.capacity,
                 cargo_units: ship.cargo.units,

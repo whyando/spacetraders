@@ -2,5 +2,5 @@ apiVersion: v2
 name: spacetraders
 description: A Helm chart for SpaceTraders game client
 type: application
-version: 0.3.10
-appVersion: "0.5.19"
+version: 0.3.11
+appVersion: "0.5.20"
