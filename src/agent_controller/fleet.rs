@@ -425,20 +425,24 @@ impl FleetManager {
         ));
 
         if era == AgentEra::InterSystem1 {
-            let capital = self.ctx.faction_capital();
-            let _waypoints: Vec<WaypointDetailed> =
-                self.ctx.universe.get_system_waypoints(&capital).await;
-            let _markets = self
-                .ctx
-                .universe
-                .get_system_markets_remote(&capital)
-                .await;
-            let _shipyards = self
-                .ctx
-                .universe
-                .get_system_shipyards_remote(&capital)
-                .await;
-            panic!("Capital system not supported");
+            // Charting phase: fan probes out across the jump-gate network to map
+            // the web of connections as quickly as possible. The home economy
+            // (starter-system config above) keeps running to fund them.
+            const NUM_JUMPGATE_PROBES: i64 = 20;
+            for i in 0..NUM_JUMPGATE_PROBES {
+                ships.push(ShipConfig {
+                    id: format!("jumpgate_probe/{}", i),
+                    ship_model: "SHIP_PROBE".to_string(),
+                    // Bought in the starting system; mirror starter-probe criteria so a
+                    // static probe at a shipyard (or the logistics planner) can purchase.
+                    purchase_criteria: PurchaseCriteria {
+                        allow_logistic_task: true,
+                        require_cheapest: false,
+                        ..PurchaseCriteria::default()
+                    },
+                    behaviour: ShipBehaviour::JumpgateProbe,
+                });
+            }
         }
         ships
     }
@@ -550,7 +554,14 @@ impl FleetManager {
                         None
                     }
                 }
-                AgentEra::StartingSystem2 => None,
+                AgentEra::StartingSystem2 => {
+                    // Once the home jump gate is built, start charting the network.
+                    if self.is_jumpgate_finished().await {
+                        Some(AgentEra::InterSystem1)
+                    } else {
+                        None
+                    }
+                }
                 AgentEra::InterSystem1 => None,
                 AgentEra::InterSystem2 => None,
             };
