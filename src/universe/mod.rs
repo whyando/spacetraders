@@ -24,7 +24,7 @@ use moka::future::Cache;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use self::pathfinding::WarpEdge;
+use self::pathfinding::{JumpGate, WarpEdge};
 
 pub enum WaypointFilter {
     Imports(String),
@@ -60,8 +60,14 @@ pub struct Universe {
     factions: DashMap<String, Faction>,
     jumpgates: DashMap<WaypointSymbol, JumpGateInfo>,
 
+    // flips to true once the full galaxy of systems has been loaded into the DB +
+    // cache; full-galaxy consumers (jumpgate/warp graphs) await this.
+    systems_ready: tokio::sync::watch::Sender<bool>,
+
     // cache
     warp_jump_graph: Cache<(), BTreeMap<SystemSymbol, BTreeMap<SystemSymbol, WarpEdge>>>,
+    // cached jumpgate graph; invalidated whenever a gate's connections change
+    jumpgate_graph: Cache<(), Arc<BTreeMap<WaypointSymbol, JumpGate>>>,
 }
 
 impl Universe {
@@ -74,6 +80,9 @@ impl Universe {
         let remote_shipyards = load_remote_shipyards(&db).await;
         let markets = load_markets(&db).await;
         let shipyards = load_shipyards(&db).await;
+        // If we've already bulk-loaded the galaxy this reset, start ready.
+        let galaxy_loaded = db.get_value::<bool>("galaxy_loaded").await.unwrap_or(false);
+        let (systems_ready, _) = tokio::sync::watch::channel(galaxy_loaded);
         Self {
             api_client: api_client.clone(),
             db: db.clone(),
@@ -86,8 +95,81 @@ impl Universe {
             shipyards: DashMap::from_iter(shipyards),
             factions: DashMap::from_iter(factions),
             jumpgates: DashMap::from_iter(jumpgates),
+            systems_ready,
 
             warp_jump_graph: Cache::new(1),
+            jumpgate_graph: Cache::new(1),
+        }
+    }
+
+    // Wait until the full galaxy has been loaded (returns immediately if already loaded).
+    pub async fn await_systems_loaded(&self) {
+        let mut rx = self.systems_ready.subscribe();
+        if *rx.borrow_and_update() {
+            return;
+        }
+        while rx.changed().await.is_ok() {
+            if *rx.borrow_and_update() {
+                return;
+            }
+        }
+    }
+
+    // Kick off a one-time background load of every system in the galaxy. No-op if
+    // it's already been done this reset.
+    pub fn spawn_galaxy_load(self: &Arc<Self>) {
+        if *self.systems_ready.borrow() {
+            return;
+        }
+        let this = self.clone();
+        tokio::spawn(async move {
+            this.load_all_systems().await;
+            this.db.set_value("galaxy_loaded", &true).await;
+            let _ = this.systems_ready.send(true);
+            info!("Galaxy load complete: {} systems", this.num_systems());
+        });
+    }
+
+    // Fetch the full paginated systems list and bulk-insert systems + waypoints,
+    // then repopulate the in-memory cache from the DB.
+    async fn load_all_systems(&self) {
+        let start = std::time::Instant::now();
+        let systems: Vec<api_models::System> = self.api_client.get_all_pages("/systems").await;
+        info!(
+            "Fetched {} systems from API in {:.1}s",
+            systems.len(),
+            start.elapsed().as_secs_f64()
+        );
+
+        let system_inserts: Vec<db_models::NewSystem> = systems
+            .iter()
+            .map(|s| db_models::NewSystem {
+                symbol: s.symbol.as_str(),
+                type_: &s.system_type,
+                x: s.x as i32,
+                y: s.y as i32,
+            })
+            .collect();
+        let system_ids = self.db.insert_systems(&system_inserts).await;
+
+        let mut waypoint_inserts: Vec<db_models::NewWaypoint> = Vec::new();
+        for (s, &system_id) in systems.iter().zip(system_ids.iter()) {
+            for w in &s.waypoints {
+                waypoint_inserts.push(db_models::NewWaypoint {
+                    symbol: w.symbol.as_str(),
+                    system_id,
+                    type_: &w.waypoint_type,
+                    x: w.x as i32,
+                    y: w.y as i32,
+                });
+            }
+        }
+        self.db.insert_waypoints(&waypoint_inserts).await;
+
+        // Repopulate the cache from the DB to avoid manual waypoint-id bookkeeping.
+        let fresh = load_systems(&self.db).await;
+        for (symbol, system) in fresh {
+            self.systems.insert(symbol, system);
         }
     }
 
@@ -610,15 +692,26 @@ impl Universe {
 
     // Get jumpgate connections for a charted system
     pub async fn get_jumpgate_connections(&self, symbol: &WaypointSymbol) -> JumpGateInfo {
-        if let Some(jumpgate_info) = &self.jumpgates.get(symbol) {
-            return jumpgate_info.value().clone();
+        if let Some(jumpgate_info) = self.jumpgates.get(symbol) {
+            // Trust the cache only once the gate is constructed; a gate cached while
+            // still under construction may since have completed, so re-derive those.
+            if jumpgate_info.is_constructed {
+                return jumpgate_info.value().clone();
+            }
         }
 
-        // Otherwise fetch from API
-        let waypoint = self.detailed_waypoint(symbol).await;
+        // Otherwise fetch from API. Construction status comes from the construction
+        // site (is_complete) rather than the waypoint flag, which can stay stale
+        // after the gate finishes building.
+        let construction = self.get_construction(symbol).await;
+        let is_constructed = construction
+            .data
+            .as_ref()
+            .map(|c| c.is_complete)
+            .unwrap_or(true);
         let connections = self.api_client.get_jumpgate_conns(symbol).await;
         let info = JumpGateInfo {
-            is_constructed: !waypoint.is_under_construction,
+            is_constructed,
             connections,
         };
         let insert = db_models::NewJumpGateConnections {
@@ -642,9 +735,10 @@ impl Universe {
             .await
             .expect("DB Insert error");
         self.jumpgates.insert(symbol.clone(), info.clone());
+        // Connections changed → the cached jumpgate graph is stale.
+        self.jumpgate_graph.invalidate(&()).await;
         info
     }
-
 }
 
 // Load all rows from `systems`, `waypoints` and `waypoint_details` tables

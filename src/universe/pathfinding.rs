@@ -1,12 +1,13 @@
-use super::Universe;
+use super::{JumpGateInfo, Universe};
 use crate::api_client::api_models::WaypointDetailed;
-use crate::models::{ShipFlightMode, SystemSymbol, WaypointSymbol};
+use crate::models::{ShipFlightMode, System, SystemSymbol, WaypointSymbol};
 use crate::util;
 use log::*;
 use quadtree_rs::area::AreaBuilder;
 use quadtree_rs::{Quadtree, point::Point};
 use std::cmp::max;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 pub struct NavEdge {
     pub flight_mode: ShipFlightMode,
@@ -35,70 +36,99 @@ pub struct WarpEdge {
 }
 
 impl Universe {
-    // Construct a map containing every jumpgate and its traversable connections
-    pub async fn jumpgate_graph(&self) -> BTreeMap<WaypointSymbol, JumpGate> {
-        // Start by loading the list of jumpgates from system list
-        // Load the detailed system waypoints and the jumpgate connections if the waypoint is charted
-        // This also tells us which jumpgates are constructed
-        let jumpgates = self
-            .systems()
-            .into_iter()
-            .filter(|s| !s.waypoints.is_empty())
-            .filter_map(|s| {
-                let filtered = s
-                    .waypoints
-                    .iter()
-                    .filter(|w| w.waypoint_type == "JUMP_GATE")
-                    .map(|w| w.symbol.clone())
-                    .collect::<Vec<_>>();
-                match filtered.len() {
-                    0 => None,
-                    1 => Some((s, filtered.first().unwrap().clone())),
-                    _ => panic!("Multiple jumpgates in system {}", s.symbol),
-                }
-            })
-            .collect::<Vec<_>>();
-        let mut waypoints = BTreeMap::new();
-        for (system, waypoint_symbol) in &jumpgates {
-            let waypoint = self.detailed_waypoint(waypoint_symbol).await;
-            if !waypoint.is_uncharted() {
-                let _gate = self.get_jumpgate_connections(waypoint_symbol).await;
+    // Cached map of every jumpgate and its traversable connections.
+    // `get_jumpgate_connections` invalidates this whenever a gate's connections
+    // change, so a newly-charted gate immediately opens up the frontier for the
+    // other probes.
+    pub async fn jumpgate_graph(&self) -> Arc<BTreeMap<WaypointSymbol, JumpGate>> {
+        // Needs the full galaxy: wait for the one-time background load.
+        self.await_systems_loaded().await;
+        self.jumpgate_graph
+            .get_with((), async { Arc::new(self.build_jumpgate_graph().await) })
+            .await
+    }
+
+    async fn build_jumpgate_graph(&self) -> BTreeMap<WaypointSymbol, JumpGate> {
+        // Gate nodes come straight from the (bulk-loaded) system list — one gate per
+        // system, keyed to its system for distance math. We deliberately do NOT fetch
+        // per-waypoint details here (that would be a galaxy-wide API storm). Only
+        // *charted* gates (in self.jumpgates) carry connection/construction data;
+        // every other gate is treated as an uncharted, presumed-constructed frontier
+        // node that a probe resolves on arrival.
+        let mut gate_systems: BTreeMap<WaypointSymbol, System> = BTreeMap::new();
+        for system in self.systems() {
+            let mut gates = system
+                .waypoints
+                .iter()
+                .filter(|w| w.waypoint_type == "JUMP_GATE")
+                .map(|w| w.symbol.clone());
+            if let Some(gate) = gates.next() {
+                assert!(gates.next().is_none(), "Multiple jumpgates in {}", system.symbol);
+                gate_systems.insert(gate, system);
             }
-            waypoints.insert(waypoint_symbol, (system, waypoint));
         }
 
-        // Read connections from self.jumpgates (includes uncharted gates that we know the connections for)
-        let mut graph: BTreeMap<WaypointSymbol, JumpGate> = BTreeMap::new();
-        for (&waypoint_symbol, (_s, waypoint)) in waypoints.iter() {
-            let known_connections = self.jumpgates.contains_key(waypoint_symbol);
-            let gate = JumpGate {
-                active_connections: vec![],
-                is_constructed: !waypoint.is_under_construction,
-                all_connections_known: known_connections,
+        // Charted gates' connection/construction info, read from the in-memory cache.
+        // Snapshot first (can't hold a DashMap ref across the heal's insert), then
+        // re-derive only gates still flagged not-constructed (self-heals one that has
+        // since finished building).
+        let snapshot: Vec<(WaypointSymbol, JumpGateInfo)> = self
+            .jumpgates
+            .iter()
+            .map(|kv| (kv.key().clone(), kv.value().clone()))
+            .collect();
+        let mut gate_info: BTreeMap<WaypointSymbol, JumpGateInfo> = BTreeMap::new();
+        for (symbol, info) in snapshot {
+            let info = if info.is_constructed {
+                info
+            } else {
+                self.get_jumpgate_connections(&symbol).await
             };
-            graph.insert(waypoint_symbol.clone(), gate);
+            gate_info.insert(symbol, info);
         }
-        for kv in self.jumpgates.iter() {
-            let (src_symbol, jump_info) = kv.pair();
-            let (src_system, src_waypoint) = waypoints.get(&src_symbol).unwrap();
-            if src_waypoint.is_under_construction {
+
+        // Nodes
+        let mut graph: BTreeMap<WaypointSymbol, JumpGate> = BTreeMap::new();
+        for symbol in gate_systems.keys() {
+            let info = gate_info.get(symbol);
+            graph.insert(
+                symbol.clone(),
+                JumpGate {
+                    active_connections: vec![],
+                    // uncharted gates are presumed constructed so probes will visit them
+                    is_constructed: info.map(|g| g.is_constructed).unwrap_or(true),
+                    all_connections_known: info.is_some(),
+                },
+            );
+        }
+
+        // Edges from charted gates' connection lists
+        for (src_symbol, jump_info) in &gate_info {
+            if !jump_info.is_constructed {
                 continue;
             }
+            let Some(src_system) = gate_systems.get(src_symbol) else {
+                continue;
+            };
             for dst_symbol in &jump_info.connections {
-                let (dst_system, dst_waypoint) = waypoints.get(&dst_symbol).unwrap();
-                if dst_waypoint.is_under_construction {
+                // skip links to gates we know are still under construction
+                if gate_info.get(dst_symbol).is_some_and(|g| !g.is_constructed) {
                     continue;
                 }
+                let Some(dst_system) = gate_systems.get(dst_symbol) else {
+                    continue;
+                };
                 let distance = src_system.distance(dst_system);
                 let cooldown = 60 + distance;
 
                 // src -> dst
-                let src_entry = graph.get_mut(src_symbol).unwrap();
-                src_entry
+                graph
+                    .get_mut(src_symbol)
+                    .unwrap()
                     .active_connections
                     .push((dst_symbol.clone(), cooldown));
 
-                // for dst -> src, insert unless 'complete'
+                // for dst -> src, insert unless dst's connections are already known
                 let entry = graph.get_mut(dst_symbol).unwrap();
                 if !entry.all_connections_known {
                     entry

@@ -51,6 +51,9 @@ async fn main() {
     let db = DbClient::new(&slice_id).await;
 
     let universe = Arc::new(Universe::new(&api_client, &db).await);
+    // Kick off the one-time background load of every system (no-op if already done
+    // this reset). Full-galaxy consumers await it via Universe::await_systems_loaded.
+    universe.spawn_galaxy_load();
 
     // Startup Phase: register if not already registered, and load agent token
     let agent_token = match db.get_agent_token(&callsign).await {
