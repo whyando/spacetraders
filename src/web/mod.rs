@@ -316,6 +316,8 @@ struct UniverseSystemNode {
     has_gate: bool,
     // gate connections are charted (we know where it links to)
     gate_charted: bool,
+    // gate is still under construction (can't be jumped to)
+    gate_under_construction: bool,
 }
 
 #[derive(Serialize)]
@@ -341,6 +343,10 @@ async fn api_universe(State(s): State<AppState>) -> Json<UniverseMap> {
         let gate = sys.waypoints.iter().find(|w| w.waypoint_type == "JUMP_GATE");
         let has_gate = gate.is_some();
         let gate_charted = gate.map(|g| u.connections_known(&g.symbol)).unwrap_or(false);
+        let gate_under_construction = gate
+            .and_then(|g| g.details.as_ref())
+            .map(|d| d.is_under_construction)
+            .unwrap_or(false);
         if has_gate {
             num_gates += 1;
         }
@@ -355,6 +361,7 @@ async fn api_universe(State(s): State<AppState>) -> Json<UniverseMap> {
             type_: sys.system_type.clone(),
             has_gate,
             gate_charted,
+            gate_under_construction,
         });
     }
     // Undirected, deduped edges between systems with known coordinates.

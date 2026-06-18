@@ -1,4 +1,4 @@
-use super::{JumpGateInfo, Universe};
+use super::Universe;
 use crate::api_client::api_models::WaypointDetailed;
 use crate::models::{ShipFlightMode, System, SystemSymbol, WaypointSymbol};
 use crate::util;
@@ -49,12 +49,9 @@ impl Universe {
     }
 
     async fn build_jumpgate_graph(&self) -> BTreeMap<WaypointSymbol, JumpGate> {
-        // Gate nodes come straight from the (bulk-loaded) system list — one gate per
-        // system, keyed to its system for distance math. We deliberately do NOT fetch
-        // per-waypoint details here (that would be a galaxy-wide API storm). Only
-        // *charted* gates (in self.jumpgates) carry connection/construction data;
-        // every other gate is treated as an uncharted, presumed-constructed frontier
-        // node that a probe resolves on arrival.
+        // One gate per system, keyed to its system for distance math. Gate systems'
+        // waypoint details (incl. is_under_construction) are pre-fetched during the
+        // galaxy load, so construction status is known here without per-build fetches.
         let mut gate_systems: BTreeMap<WaypointSymbol, System> = BTreeMap::new();
         for system in self.systems() {
             let mut gates = system
@@ -68,70 +65,80 @@ impl Universe {
             }
         }
 
-        // Charted gates' connection/construction info, read from the in-memory cache.
-        // Snapshot first (can't hold a DashMap ref across the heal's insert), then
-        // re-derive only gates still flagged not-constructed (self-heals one that has
-        // since finished building).
-        let snapshot: Vec<(WaypointSymbol, JumpGateInfo)> = self
+        // Construction status per gate. A waypoint flagged *constructed* is always
+        // trustworthy (a gate never reads constructed while still building, and never
+        // reverts). A waypoint flagged *under construction* can be stale after the gate
+        // completes, so confirm those few against the construction site.
+        let mut constructed: BTreeMap<WaypointSymbol, bool> = BTreeMap::new();
+        for (gate, system) in &gate_systems {
+            let flag = system
+                .waypoints
+                .iter()
+                .find(|w| &w.symbol == gate)
+                .and_then(|w| w.details.as_ref())
+                .map(|d| d.is_under_construction);
+            let is_constructed = match flag {
+                Some(true) => {
+                    let c = self.get_construction(gate).await;
+                    c.data.as_ref().map(|c| c.is_complete).unwrap_or(true)
+                }
+                // constructed, or details not loaded yet -> presume constructed
+                Some(false) | None => true,
+            };
+            constructed.insert(gate.clone(), is_constructed);
+        }
+
+        // Charted gates' connection lists (in-memory cache snapshot).
+        let charted: BTreeMap<WaypointSymbol, Vec<WaypointSymbol>> = self
             .jumpgates
             .iter()
-            .map(|kv| (kv.key().clone(), kv.value().clone()))
+            .map(|kv| (kv.key().clone(), kv.value().connections.clone()))
             .collect();
-        let mut gate_info: BTreeMap<WaypointSymbol, JumpGateInfo> = BTreeMap::new();
-        for (symbol, info) in snapshot {
-            let info = if info.is_constructed {
-                info
-            } else {
-                self.get_jumpgate_connections(&symbol).await
-            };
-            gate_info.insert(symbol, info);
-        }
 
         // Nodes
         let mut graph: BTreeMap<WaypointSymbol, JumpGate> = BTreeMap::new();
-        for symbol in gate_systems.keys() {
-            let info = gate_info.get(symbol);
+        for gate in gate_systems.keys() {
             graph.insert(
-                symbol.clone(),
+                gate.clone(),
                 JumpGate {
                     active_connections: vec![],
-                    // uncharted gates are presumed constructed so probes will visit them
-                    is_constructed: info.map(|g| g.is_constructed).unwrap_or(true),
-                    all_connections_known: info.is_some(),
+                    is_constructed: *constructed.get(gate).unwrap_or(&true),
+                    all_connections_known: charted.contains_key(gate),
                 },
             );
         }
 
-        // Edges from charted gates' connection lists
-        for (src_symbol, jump_info) in &gate_info {
-            if !jump_info.is_constructed {
+        // Edges from charted, constructed gates. Under-construction gates are excluded
+        // entirely (no edge in or out), so a route never jumps to one — at the endpoint
+        // or mid-path. Constructed gates are safe to traverse through.
+        for (src, connections) in &charted {
+            if !constructed.get(src).copied().unwrap_or(true) {
                 continue;
             }
-            let Some(src_system) = gate_systems.get(src_symbol) else {
+            let Some(src_system) = gate_systems.get(src) else {
                 continue;
             };
-            for dst_symbol in &jump_info.connections {
-                // skip links to gates we know are still under construction
-                if gate_info.get(dst_symbol).is_some_and(|g| !g.is_constructed) {
+            for dst in connections {
+                if !constructed.get(dst).copied().unwrap_or(true) {
                     continue;
                 }
-                let Some(dst_system) = gate_systems.get(dst_symbol) else {
+                let Some(dst_system) = gate_systems.get(dst) else {
                     continue;
                 };
                 let distance = src_system.distance(dst_system);
                 let cooldown = 60 + distance;
 
-                // src -> dst only. Edges are emitted from every charted+constructed
-                // gate, so a charted<->charted pair gets both directions naturally.
-                // An *uncharted* gate deliberately gets no outgoing edge: it can be a
-                // path endpoint (charting target, construction-checked before the jump)
-                // but never a pass-through, so we never jump to an unconfirmed gate
-                // mid-route.
+                // src -> dst
                 graph
-                    .get_mut(src_symbol)
+                    .get_mut(src)
                     .unwrap()
                     .active_connections
-                    .push((dst_symbol.clone(), cooldown));
+                    .push((dst.clone(), cooldown));
+                // dst -> src, unless dst is itself charted (it emits its own edges).
+                let dst_node = graph.get_mut(dst).unwrap();
+                if !dst_node.all_connections_known {
+                    dst_node.active_connections.push((src.clone(), cooldown));
+                }
             }
         }
 

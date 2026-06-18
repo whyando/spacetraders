@@ -171,6 +171,26 @@ impl Universe {
         for (symbol, system) in fresh {
             self.systems.insert(symbol, system);
         }
+
+        // Phase 2: fetch the waypoint list for every system with a jump gate, so each
+        // gate's construction status (and market/shipyard traits) is known up front.
+        // get_system_waypoints fetches + persists details when they're missing.
+        let gate_systems: Vec<SystemSymbol> = self
+            .systems()
+            .into_iter()
+            .filter(|s| s.waypoints.iter().any(|w| w.waypoint_type == "JUMP_GATE"))
+            .map(|s| s.symbol.clone())
+            .collect();
+        info!(
+            "Loading waypoint details for {} jumpgate systems...",
+            gate_systems.len()
+        );
+        for (i, sym) in gate_systems.iter().enumerate() {
+            self.get_system_waypoints(sym).await;
+            if (i + 1) % 250 == 0 {
+                info!("  ...{}/{} jumpgate systems", i + 1, gate_systems.len());
+            }
+        }
     }
 
     pub fn connections_known(&self, waypoint: &WaypointSymbol) -> bool {
@@ -740,33 +760,6 @@ impl Universe {
         info
     }
 
-    // Record a gate as under construction (it can't be jumped to) so the graph and
-    // probe reservations exclude it until it completes. Connections are left empty;
-    // get_jumpgate_connections re-derives once it's built.
-    pub async fn mark_jumpgate_under_construction(&self, symbol: &WaypointSymbol) {
-        let info = JumpGateInfo {
-            is_constructed: false,
-            connections: vec![],
-        };
-        let insert = db_models::NewJumpGateConnections {
-            waypoint_symbol: symbol.as_str(),
-            is_under_construction: true,
-            edges: vec![],
-        };
-        diesel::insert_into(jumpgate_connections::table)
-            .values(&insert)
-            .on_conflict(jumpgate_connections::waypoint_symbol)
-            .do_update()
-            .set((
-                jumpgate_connections::is_under_construction.eq(&insert.is_under_construction),
-                jumpgate_connections::edges.eq(&insert.edges),
-            ))
-            .execute(&mut self.db.conn().await)
-            .await
-            .expect("DB Insert error");
-        self.jumpgates.insert(symbol.clone(), info);
-        self.jumpgate_graph.invalidate(&()).await;
-    }
 }
 
 // Load all rows from `systems`, `waypoints` and `waypoint_details` tables
