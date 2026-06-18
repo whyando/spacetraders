@@ -42,13 +42,30 @@ async fn tick(
             let target = ac
                 .get_probe_jumpgate_reservation(&ship.symbol(), &ship.waypoint())
                 .await;
-            let desc = match &target {
-                Some(target) => format!("Exploring jumpgate {}", target),
-                None => "No target".to_string(),
-            };
-            ship.set_state_description(&desc);
             match target {
-                Some(target) => Some(Exploring(target)),
+                Some(target) => {
+                    // A gate that's still under construction can't be jumped to (the
+                    // API rejects it). Exclude it and pick another target rather than
+                    // letting the jump panic and crash the agent.
+                    let construction = ship.ctx.universe.get_construction(&target).await;
+                    let under_construction = construction
+                        .data
+                        .as_ref()
+                        .map(|c| !c.is_complete)
+                        .unwrap_or(false);
+                    if under_construction {
+                        info!("Jumpgate {} is under construction; skipping", target);
+                        ship.ctx
+                            .universe
+                            .mark_jumpgate_under_construction(&target)
+                            .await;
+                        ac.clear_probe_jumpgate_reservation(&ship.symbol()).await;
+                        Some(Init)
+                    } else {
+                        ship.set_state_description(&format!("Exploring jumpgate {}", target));
+                        Some(Exploring(target))
+                    }
+                }
                 None => Some(Idle),
             }
         }

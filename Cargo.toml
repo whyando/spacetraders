@@ -1,6 +1,6 @@
 [package]
 name = "st"
-version = "0.5.21"
+version = "0.5.22"
 edition = "2024"
 default-run = "main"
 publish = false
