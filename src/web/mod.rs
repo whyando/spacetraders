@@ -33,6 +33,7 @@ pub async fn serve(controller: AgentController, db: DbClient, port: u16) {
         .route("/api/ships", get(api_ships))
         .route("/api/history", get(api_history))
         .route("/api/construction", get(api_construction))
+        .route("/api/universe", get(api_universe))
         .route("/api/systems", get(api_systems))
         .route("/api/systems/{system}/markets", get(api_system_markets))
         .route("/api/markets/{waypoint}", get(api_market))
@@ -59,11 +60,14 @@ struct AgentSummary {
     headquarters: String,
     starting_faction: String,
     num_ships: usize,
+    // current lifecycle phase (e.g. StartingSystem1, InterSystem1)
+    era: String,
 }
 
 async fn api_agent(State(s): State<AppState>) -> Json<AgentSummary> {
     let agent = s.controller.agent();
     let num_ships = s.controller.ships().len();
+    let era = format!("{:?}", s.controller.state().era);
     // latest net worth from the KPI series, falling back to liquid credits
     let net_worth = s
         .db
@@ -79,6 +83,7 @@ async fn api_agent(State(s): State<AppState>) -> Json<AgentSummary> {
         headquarters: agent.headquarters.to_string(),
         starting_faction: agent.starting_faction,
         num_ships,
+        era,
     })
 }
 
@@ -294,6 +299,89 @@ async fn api_construction(State(s): State<AppState>) -> Json<Vec<ConstructionSit
         });
     }
     Json(sites)
+}
+
+#[derive(Serialize)]
+struct UniverseSystemNode {
+    symbol: String,
+    x: i64,
+    y: i64,
+    #[serde(rename = "type")]
+    type_: String,
+    has_gate: bool,
+    // gate connections are charted (we know where it links to)
+    gate_charted: bool,
+}
+
+#[derive(Serialize)]
+struct UniverseMap {
+    systems: Vec<UniverseSystemNode>,
+    // undirected charted gate-to-gate links, as pairs of system symbols
+    edges: Vec<(String, String)>,
+    num_systems: usize,
+    num_gates: usize,
+    num_charted: usize,
+}
+
+// Full galaxy map: every known system by coordinate, plus the charted jump-gate
+// network, built from in-memory caches (no live API / graph rebuild).
+async fn api_universe(State(s): State<AppState>) -> Json<UniverseMap> {
+    let u = &s.controller.ctx.universe;
+    let systems = u.systems();
+    let mut nodes = Vec::with_capacity(systems.len());
+    let mut known: BTreeSet<String> = BTreeSet::new();
+    let mut num_gates = 0;
+    let mut num_charted = 0;
+    for sys in &systems {
+        let gate = sys.waypoints.iter().find(|w| w.waypoint_type == "JUMP_GATE");
+        let has_gate = gate.is_some();
+        let gate_charted = gate.map(|g| u.connections_known(&g.symbol)).unwrap_or(false);
+        if has_gate {
+            num_gates += 1;
+        }
+        if gate_charted {
+            num_charted += 1;
+        }
+        known.insert(sys.symbol.to_string());
+        nodes.push(UniverseSystemNode {
+            symbol: sys.symbol.to_string(),
+            x: sys.x,
+            y: sys.y,
+            type_: sys.system_type.clone(),
+            has_gate,
+            gate_charted,
+        });
+    }
+    // Undirected, deduped edges between systems with known coordinates.
+    let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut edges = Vec::new();
+    for (src, conns) in u.charted_jumpgate_connections() {
+        let a = src.system().to_string();
+        for dst in conns {
+            let b = dst.system().to_string();
+            if a == b {
+                continue;
+            }
+            let key = if a < b {
+                (a.clone(), b.clone())
+            } else {
+                (b.clone(), a.clone())
+            };
+            if !known.contains(&key.0) || !known.contains(&key.1) {
+                continue;
+            }
+            if seen.insert(key.clone()) {
+                edges.push(key);
+            }
+        }
+    }
+    Json(UniverseMap {
+        num_systems: nodes.len(),
+        num_gates,
+        num_charted,
+        systems: nodes,
+        edges,
+    })
 }
 
 #[derive(Serialize)]

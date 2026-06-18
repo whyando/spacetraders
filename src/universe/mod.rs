@@ -95,6 +95,15 @@ impl Universe {
         self.jumpgates.contains_key(waypoint)
     }
 
+    // Snapshot of charted jumpgate connections (gate waypoint -> connected gate
+    // waypoints), straight from the in-memory cache. Cheap; used by the web map.
+    pub fn charted_jumpgate_connections(&self) -> Vec<(WaypointSymbol, Vec<WaypointSymbol>)> {
+        self.jumpgates
+            .iter()
+            .map(|kv| (kv.key().clone(), kv.value().connections.clone()))
+            .collect()
+    }
+
     pub fn systems(&self) -> Vec<System> {
         self.systems.iter().map(|x| x.value().clone()).collect()
     }
