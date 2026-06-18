@@ -121,20 +121,17 @@ impl Universe {
                 let distance = src_system.distance(dst_system);
                 let cooldown = 60 + distance;
 
-                // src -> dst
+                // src -> dst only. Edges are emitted from every charted+constructed
+                // gate, so a charted<->charted pair gets both directions naturally.
+                // An *uncharted* gate deliberately gets no outgoing edge: it can be a
+                // path endpoint (charting target, construction-checked before the jump)
+                // but never a pass-through, so we never jump to an unconfirmed gate
+                // mid-route.
                 graph
                     .get_mut(src_symbol)
                     .unwrap()
                     .active_connections
                     .push((dst_symbol.clone(), cooldown));
-
-                // for dst -> src, insert unless dst's connections are already known
-                let entry = graph.get_mut(dst_symbol).unwrap();
-                if !entry.all_connections_known {
-                    entry
-                        .active_connections
-                        .push((src_symbol.clone(), cooldown));
-                }
             }
         }
 

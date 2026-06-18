@@ -2481,7 +2481,7 @@ dependencies = [
 
 [[package]]
 name = "st"
-version = "0.5.22"
+version = "0.5.23"
 dependencies = [
  "axum",
  "chrono",
