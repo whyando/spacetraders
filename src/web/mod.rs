@@ -212,7 +212,16 @@ struct ConstructionSiteView {
 }
 
 async fn api_construction(State(s): State<AppState>) -> Json<Vec<ConstructionSiteView>> {
-    let waypoints = s.db.construction_waypoints().await;
+    // Only surface the jump-gate construction in our headquarters system.
+    let hq_system = s.controller.agent().headquarters.system();
+    let hq_gate = s.controller.ctx.universe.get_jumpgate_opt(&hq_system).await;
+    let waypoints: Vec<String> = s
+        .db
+        .construction_waypoints()
+        .await
+        .into_iter()
+        .filter(|wp| hq_gate.as_ref().map(|g| g.to_string()) == Some(wp.clone()))
+        .collect();
     let mut sites = Vec::with_capacity(waypoints.len());
     let mut all_symbols: BTreeSet<String> = BTreeSet::new();
 
