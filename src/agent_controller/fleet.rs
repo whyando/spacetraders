@@ -177,13 +177,16 @@ impl FleetManager {
         ));
         self.ctx
             .db
-            .insert_agent_transaction(
-                transaction.timestamp,
-                "ship_purchase",
-                Some(&transaction.ship_type),
-                Some(&transaction.waypoint_symbol.to_string()),
-                -transaction.price,
-            )
+            .record_cash_txn(crate::database::CashTxn {
+                ts: transaction.timestamp,
+                type_: "ship_purchase",
+                ship_symbol: Some(&ship_symbol),
+                reference: Some(&transaction.ship_type),
+                waypoint: Some(&transaction.waypoint_symbol.to_string()),
+                units: None,
+                amount: -transaction.price,
+                realized_profit: None,
+            })
             .await;
         self.ctx.update_agent(agent);
         self.ctx

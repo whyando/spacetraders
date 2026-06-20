@@ -13,20 +13,9 @@ CREATE TABLE IF NOT EXISTS ___SCHEMA___.generic_lookup (
     PRIMARY KEY (key)
 );
 
--- market_transaction_log
-CREATE TABLE IF NOT EXISTS ___SCHEMA___.market_transaction_log (
-    id BIGSERIAL NOT NULL,
-    "timestamp" timestamp with time zone NOT NULL,
-    market_symbol text NOT NULL,
-    symbol text NOT NULL,
-    ship_symbol text NOT NULL,
-    type text NOT NULL,
-    units integer NOT NULL,
-    price_per_unit integer NOT NULL,
-    total_price integer NOT NULL,
-    PRIMARY KEY (id)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS market_transaction_log_idx ON ___SCHEMA___.market_transaction_log USING btree (market_symbol, "timestamp");
+-- market_transaction_log was replaced by the agent_transaction_log cash journal
+-- (the single source of truth for our own credit movements). Drop the dead table.
+DROP TABLE IF EXISTS ___SCHEMA___.market_transaction_log;
 
 -- market_trades (per-good supply/price snapshots; one row per good each time a value changes)
 CREATE TABLE IF NOT EXISTS ___SCHEMA___.market_trades (
@@ -155,17 +144,28 @@ ALTER TABLE ___SCHEMA___.agent_metrics ADD COLUMN IF NOT EXISTS net_worth bigint
 -- create_hypertable lives in public; the app pins search_path to the slice schema, so qualify it.
 SELECT public.create_hypertable('___SCHEMA___.agent_metrics', 'ts', if_not_exists => TRUE);
 
--- agent_transaction_log (non-market cash events: ship purchases, contract payments)
--- amount is signed: negative = credits out, positive = credits in.
+-- agent_transaction_log: the complete cash journal. One row for every event
+-- that changes the agent's credits (trade buy/sell, refuel, jump, scrap, ship
+-- purchase, contract payments). amount is the signed gross cash delta (negative
+-- = credits out). realized_profit is set on trade_sell rows only (proceeds -
+-- cost basis of the units sold) and is NOT part of the cash sum. Summing amount
+-- over any window must equal the actual change in credits (reconciliation).
 CREATE TABLE IF NOT EXISTS ___SCHEMA___.agent_transaction_log (
-    id        bigint GENERATED ALWAYS AS IDENTITY,
-    ts        timestamptz NOT NULL,
-    type      text        NOT NULL,
-    reference text,
-    waypoint  text,
-    amount    bigint      NOT NULL,
+    id              bigint GENERATED ALWAYS AS IDENTITY,
+    ts              timestamptz NOT NULL,
+    type            text        NOT NULL,
+    ship_symbol     text,
+    reference       text,
+    waypoint        text,
+    units           integer,
+    amount          bigint      NOT NULL,
+    realized_profit bigint,
     PRIMARY KEY (id, ts)
 );
+-- migrate schemas created before the journal carried per-trade detail
+ALTER TABLE ___SCHEMA___.agent_transaction_log ADD COLUMN IF NOT EXISTS ship_symbol text;
+ALTER TABLE ___SCHEMA___.agent_transaction_log ADD COLUMN IF NOT EXISTS units integer;
+ALTER TABLE ___SCHEMA___.agent_transaction_log ADD COLUMN IF NOT EXISTS realized_profit bigint;
 SELECT public.create_hypertable('___SCHEMA___.agent_transaction_log', 'ts', if_not_exists => TRUE);
 
 -- construction_log (per-material fulfilled/required snapshots; one row per material per snapshot)

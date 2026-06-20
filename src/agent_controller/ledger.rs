@@ -1,6 +1,14 @@
-/// Track the allocations of current credits of the agent, plus the
-/// weighted-average cost basis of in-transit cargo so realized trade profit can
-/// be computed at sell time (proceeds - cost basis of the units sold).
+/// In-memory operational state for the agent's economy. Two concerns only:
+///   1. Live credit allocation (reservations) for spend gating — how much of the
+///      current balance is already promised to in-flight trade jobs.
+///   2. Weighted-average cost basis of in-transit cargo, so realized trade
+///      profit (proceeds - cost basis of the units sold) can be computed at sell
+///      time and the in-transit cargo can be valued for net worth.
+///
+/// The durable record of every credit movement lives in the Postgres cash
+/// journal (agent_transaction_log), not here; this struct holds only the live
+/// state that gating and realized-margin need in memory.
+use chrono::{DateTime, Utc};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -29,6 +37,9 @@ impl ShipEntry {
 pub struct Ledger {
     total_credits: Mutex<i64>,
     ships: Mutex<BTreeMap<String, ShipEntry>>,
+    // (ts, credits) captured on the first reconciliation tick of this process;
+    // the journal cash-delta since this point must equal the actual credit change.
+    recon_start: Mutex<Option<(DateTime<Utc>, i64)>>,
 }
 
 impl Ledger {
@@ -36,7 +47,19 @@ impl Ledger {
         Ledger {
             total_credits: Mutex::new(start_credits),
             ships: Mutex::new(BTreeMap::new()),
+            recon_start: Mutex::new(None),
         }
+    }
+
+    // Return the reconciliation baseline (ts, credits), initializing it to the
+    // supplied values on the first call. The caller compares the journal's
+    // cash-delta since this ts against (credits_now - baseline_credits).
+    pub fn recon_baseline(&self, now: DateTime<Utc>, credits_now: i64) -> (DateTime<Utc>, i64) {
+        *self
+            .recon_start
+            .lock()
+            .unwrap()
+            .get_or_insert((now, credits_now))
     }
 
     pub fn set_credits(&self, credits: i64) {

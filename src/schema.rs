@@ -18,9 +18,12 @@ diesel::table! {
         ts -> Timestamptz,
         #[sql_name = "type"]
         type_ -> Text,
+        ship_symbol -> Nullable<Text>,
         reference -> Nullable<Text>,
         waypoint -> Nullable<Text>,
+        units -> Nullable<Int4>,
         amount -> Int8,
+        realized_profit -> Nullable<Int8>,
     }
 }
 
@@ -50,21 +53,6 @@ diesel::table! {
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         is_under_construction -> Bool,
-    }
-}
-
-diesel::table! {
-    market_transaction_log (id) {
-        id -> Int8,
-        timestamp -> Timestamptz,
-        market_symbol -> Text,
-        symbol -> Text,
-        ship_symbol -> Text,
-        #[sql_name = "type"]
-        type_ -> Text,
-        units -> Int4,
-        price_per_unit -> Int4,
-        total_price -> Int4,
     }
 }
 
@@ -175,7 +163,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     generic_lookup,
     jumpgate_connections,
     market_trades,
-    market_transaction_log,
     markets,
     remote_markets,
     remote_shipyards,

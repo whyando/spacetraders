@@ -162,12 +162,11 @@ struct HistoryPoint {
 }
 
 async fn api_history(State(s): State<AppState>) -> Json<Vec<HistoryPoint>> {
-    let callsign = s.controller.agent().symbol;
     let metrics = s.db.get_metrics_history(5000).await;
     let ship_spend_events = s.db.ship_spend_events().await;
-    let construction_events = s.db.construction_spend_events(&callsign).await;
+    let construction_events = s.db.construction_spend_events().await;
     let fuel_events = s.db.fuel_spend_events().await;
-    let antimatter_events = s.db.antimatter_spend_events(&callsign).await;
+    let antimatter_events = s.db.antimatter_spend_events().await;
     let profit_events = s.db.realized_profit_events().await;
     let baseline = metrics.first().map(|m| m.net_worth).unwrap_or(0);
     // Walk all ascending series together, accumulating onto the metrics timeline.

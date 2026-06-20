@@ -17,7 +17,6 @@ use diesel::ExpressionMethods as _;
 use diesel::OptionalExtension as _;
 use diesel::QueryDsl as _;
 use diesel::QueryableByName;
-use diesel::TextExpressionMethods as _;
 use diesel::SelectableHelper as _;
 use diesel::sql_types::{BigInt, Integer, Nullable, Text};
 use diesel::upsert::excluded;
@@ -43,6 +42,23 @@ pub struct MetricsPoint {
     pub credits: i64,
     pub net_worth: i64,
     pub num_ships: i32,
+}
+
+// One row of the cash journal. `amount` is the signed gross cash delta (negative
+// = credits out, positive = credits in). `realized_profit` is set on trade_sell
+// rows only (proceeds - cost basis of the units sold) and is NOT part of the
+// cash sum. Build one of these at every credit-changing call site and pass it to
+// DbClient::record_cash_txn — the single choke point that keeps the journal
+// complete.
+pub struct CashTxn<'a> {
+    pub ts: chrono::DateTime<Utc>,
+    pub type_: &'a str,
+    pub ship_symbol: Option<&'a str>,
+    pub reference: Option<&'a str>,
+    pub waypoint: Option<&'a str>,
+    pub units: Option<i32>,
+    pub amount: i64,
+    pub realized_profit: Option<i64>,
 }
 
 
@@ -363,55 +379,54 @@ impl DbClient {
             .expect("DB Query error")
     }
 
-    // Our own buy/sell transactions at a market (ascending).
+    // Our own buy/sell transactions at a market (ascending), read from the cash
+    // journal. Type is normalized to PURCHASE/SELL for the dashboard view.
     pub async fn market_transactions(
         &self,
         market: &WaypointSymbol,
     ) -> Vec<(chrono::DateTime<Utc>, String, String, i32, i32, i32)> {
-        market_transaction_log::table
-            .filter(market_transaction_log::market_symbol.eq(market.to_string()))
-            .select((
-                market_transaction_log::timestamp,
-                market_transaction_log::symbol,
-                market_transaction_log::type_,
-                market_transaction_log::units,
-                market_transaction_log::price_per_unit,
-                market_transaction_log::total_price,
-            ))
-            .order(market_transaction_log::timestamp.asc())
-            .load(&mut self.conn().await)
-            .await
-            .expect("DB Query error")
-    }
-
-    pub async fn upsert_market_transactions(&self, market: &WithTimestamp<Market>) {
-        let inserts = market
-            .data
-            .transactions
-            .iter()
-            .map(|transaction| {
+        #[derive(QueryableByName)]
+        struct Row {
+            #[diesel(sql_type = diesel::sql_types::Timestamptz)]
+            ts: chrono::DateTime<Utc>,
+            #[diesel(sql_type = Text)]
+            symbol: String,
+            #[diesel(sql_type = Text)]
+            type_: String,
+            #[diesel(sql_type = Integer)]
+            units: i32,
+            #[diesel(sql_type = Integer)]
+            price_per_unit: i32,
+            #[diesel(sql_type = Integer)]
+            total_price: i32,
+        }
+        let rows: Vec<Row> = diesel::sql_query(
+            "SELECT ts, \
+                    reference AS symbol, \
+                    CASE WHEN type='trade_sell' THEN 'SELL' ELSE 'PURCHASE' END AS type_, \
+                    COALESCE(units, 0) AS units, \
+                    CASE WHEN COALESCE(units,0) <> 0 THEN (ABS(amount) / units)::int ELSE 0 END AS price_per_unit, \
+                    ABS(amount)::int AS total_price \
+             FROM agent_transaction_log \
+             WHERE type IN ('trade_buy','trade_sell') AND waypoint = $1 \
+             ORDER BY ts ASC",
+        )
+        .bind::<Text, _>(market.to_string())
+        .get_results(&mut self.conn().await)
+        .await
+        .expect("DB Query error");
+        rows.into_iter()
+            .map(|r| {
                 (
-                    market_transaction_log::timestamp.eq(transaction.timestamp),
-                    market_transaction_log::market_symbol.eq(market.data.symbol.to_string()),
-                    market_transaction_log::symbol.eq(&transaction.trade_symbol),
-                    market_transaction_log::ship_symbol.eq(&transaction.ship_symbol),
-                    market_transaction_log::type_.eq(&transaction._type),
-                    market_transaction_log::units.eq(transaction.units as i32),
-                    market_transaction_log::price_per_unit.eq(transaction.price_per_unit as i32),
-                    market_transaction_log::total_price.eq(transaction.total_price as i32),
+                    r.ts,
+                    r.symbol,
+                    r.type_,
+                    r.units,
+                    r.price_per_unit,
+                    r.total_price,
                 )
             })
-            .collect::<Vec<_>>();
-        diesel::insert_into(market_transaction_log::table)
-            .values(inserts)
-            .on_conflict((
-                market_transaction_log::market_symbol,
-                market_transaction_log::timestamp,
-            ))
-            .do_nothing()
-            .execute(&mut self.conn().await)
-            .await
-            .expect("DB Query error");
+            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -469,37 +484,53 @@ impl DbClient {
 
     // Ship-purchase cash events (ascending by ts), amounts returned as positive spend.
     pub async fn ship_spend_events(&self) -> Vec<(chrono::DateTime<Utc>, i64)> {
-        let rows: Vec<(chrono::DateTime<Utc>, i64)> = agent_transaction_log::table
-            .filter(agent_transaction_log::type_.eq("ship_purchase"))
-            .select((agent_transaction_log::ts, agent_transaction_log::amount))
-            .order(agent_transaction_log::ts.asc())
-            .load(&mut self.conn().await)
-            .await
-            .expect("DB Query error");
-        // stored amounts are negative (credits out); flip to positive spend
-        rows.into_iter().map(|(ts, amount)| (ts, -amount)).collect()
+        self.spend_events("ship_purchase").await
     }
 
-    // Log a non-market cash event (amount signed: negative = credits out).
-    pub async fn insert_agent_transaction(
-        &self,
-        ts: chrono::DateTime<Utc>,
-        type_: &str,
-        reference: Option<&str>,
-        waypoint: Option<&str>,
-        amount: i64,
-    ) {
+    // The single choke point for the cash journal: every credit-changing event
+    // is recorded here. Keeping all spend/income paths funneled through this one
+    // method is what lets the reconciliation check (record_metrics) assert the
+    // journal is complete.
+    pub async fn record_cash_txn(&self, t: CashTxn<'_>) {
         diesel::insert_into(agent_transaction_log::table)
             .values((
-                agent_transaction_log::ts.eq(ts),
-                agent_transaction_log::type_.eq(type_),
-                agent_transaction_log::reference.eq(reference),
-                agent_transaction_log::waypoint.eq(waypoint),
-                agent_transaction_log::amount.eq(amount),
+                agent_transaction_log::ts.eq(t.ts),
+                agent_transaction_log::type_.eq(t.type_),
+                agent_transaction_log::ship_symbol.eq(t.ship_symbol),
+                agent_transaction_log::reference.eq(t.reference),
+                agent_transaction_log::waypoint.eq(t.waypoint),
+                agent_transaction_log::units.eq(t.units),
+                agent_transaction_log::amount.eq(t.amount),
+                agent_transaction_log::realized_profit.eq(t.realized_profit),
             ))
             .execute(&mut self.conn().await)
             .await
             .expect("DB Query error");
+    }
+
+    // Sum of journal cash deltas in (start, end]. Used by the reconciliation
+    // check: this must equal the actual change in credits over the same window,
+    // or some credit-moving path isn't going through record_cash_txn.
+    pub async fn cash_txn_sum_between(
+        &self,
+        start: chrono::DateTime<Utc>,
+        end: chrono::DateTime<Utc>,
+    ) -> i64 {
+        #[derive(QueryableByName)]
+        struct SumRet {
+            #[diesel(sql_type = BigInt)]
+            total: i64,
+        }
+        let result: SumRet = diesel::sql_query(
+            "SELECT COALESCE(SUM(amount), 0)::bigint AS total \
+             FROM agent_transaction_log WHERE ts > $1 AND ts <= $2",
+        )
+        .bind::<diesel::sql_types::Timestamptz, _>(start)
+        .bind::<diesel::sql_types::Timestamptz, _>(end)
+        .get_result(&mut self.conn().await)
+        .await
+        .expect("DB Query error");
+        result.total
     }
 
     // Cumulative credits spent on ships (cost basis), used to approximate net worth.
@@ -709,9 +740,10 @@ impl DbClient {
         rows.into_iter().map(|r| r.waypoint).collect()
     }
 
-    // Net credits spent on the listed trade goods at markets (PURCHASE - SELL).
-    // Construction haulers shouldn't sell these, so SELL is normally zero; subtracting
-    // it keeps the figure honest if mining ever offloads the same symbol.
+    // Net credits spent on the listed trade goods (buys - sells), from our cash
+    // journal. Construction haulers shouldn't sell these, so the figure is
+    // normally just gross purchases; subtracting sells keeps it honest if mining
+    // ever offloads the same symbol.
     pub async fn market_net_spend_by_good(&self, symbols: &[String]) -> Vec<(String, i64)> {
         if symbols.is_empty() {
             return vec![];
@@ -723,13 +755,12 @@ impl DbClient {
             #[diesel(sql_type = BigInt)]
             net_spend: i64,
         }
+        // amount is signed cash (buy negative, sell positive); -SUM = net spend.
         let rows: Vec<Row> = diesel::sql_query(
-            "SELECT symbol, \
-             (COALESCE(SUM(total_price) FILTER (WHERE type = 'PURCHASE'), 0) \
-              - COALESCE(SUM(total_price) FILTER (WHERE type = 'SELL'), 0))::bigint AS net_spend \
-             FROM market_transaction_log \
-             WHERE symbol = ANY($1) \
-             GROUP BY symbol",
+            "SELECT reference AS symbol, (-COALESCE(SUM(amount), 0))::bigint AS net_spend \
+             FROM agent_transaction_log \
+             WHERE type IN ('trade_buy','trade_sell') AND reference = ANY($1) \
+             GROUP BY reference",
         )
         .bind::<diesel::sql_types::Array<Text>, _>(symbols)
         .get_results(&mut self.conn().await)
@@ -738,14 +769,11 @@ impl DbClient {
         rows.into_iter().map(|r| (r.symbol, r.net_spend)).collect()
     }
 
-    // Cash flow events for any market transaction whose trade good is a known
-    // construction material (positive = credits out for a purchase, negative =
-    // credits in for a sell). Used to back the gate-donation correction on the
-    // dashboard's Total Profit line.
-    pub async fn construction_spend_events(
-        &self,
-        callsign: &str,
-    ) -> Vec<(chrono::DateTime<Utc>, i64)> {
+    // Net spend (credits out, positive) per event on any trade whose good is a
+    // known construction material. Construction haulers buy these and donate them
+    // to gates (no resale), so this is the gate-construction expense line. The
+    // journal is our agent only, so no callsign filter is needed.
+    pub async fn construction_spend_events(&self) -> Vec<(chrono::DateTime<Utc>, i64)> {
         #[derive(QueryableByName)]
         struct Row {
             #[diesel(sql_type = diesel::sql_types::Timestamptz)]
@@ -753,70 +781,57 @@ impl DbClient {
             #[diesel(sql_type = BigInt)]
             amount: i64,
         }
-        // ship_symbol LIKE 'CALLSIGN-%' excludes other agents' transactions,
-        // which the market feed includes when they trade at the same market.
         let rows: Vec<Row> = diesel::sql_query(
-            "SELECT mt.timestamp AS ts, \
-             (CASE WHEN mt.type='PURCHASE' THEN mt.total_price ELSE -mt.total_price END)::bigint AS amount \
-             FROM market_transaction_log mt \
-             WHERE mt.symbol IN (SELECT DISTINCT trade_symbol FROM construction_log) \
-             AND mt.ship_symbol LIKE $1 \
-             ORDER BY mt.timestamp ASC",
+            "SELECT ts, (-amount)::bigint AS amount \
+             FROM agent_transaction_log \
+             WHERE type IN ('trade_buy','trade_sell') \
+             AND reference IN (SELECT DISTINCT trade_symbol FROM construction_log) \
+             ORDER BY ts ASC",
         )
-        .bind::<Text, _>(format!("{}-%", callsign))
         .get_results(&mut self.conn().await)
         .await
         .expect("DB Query error");
         rows.into_iter().map(|r| (r.ts, r.amount)).collect()
     }
 
-    // Jump-gate antimatter spend (credits out): every ANTIMATTER PURCHASE by our
-    // own ships. Antimatter is bought at markets as cargo then burned on jumps;
-    // we never resell it, so gross purchases are the true cost. Filtered by
-    // callsign to exclude other agents captured in the shared market feed.
-    pub async fn antimatter_spend_events(
-        &self,
-        callsign: &str,
-    ) -> Vec<(chrono::DateTime<Utc>, i64)> {
-        let rows: Vec<(chrono::DateTime<Utc>, i32)> = market_transaction_log::table
-            .filter(market_transaction_log::symbol.eq("ANTIMATTER"))
-            .filter(market_transaction_log::type_.eq("PURCHASE"))
-            .filter(market_transaction_log::ship_symbol.like(format!("{}-%", callsign)))
-            .select((
-                market_transaction_log::timestamp,
-                market_transaction_log::total_price,
-            ))
-            .order(market_transaction_log::timestamp.asc())
-            .load::<(chrono::DateTime<Utc>, i32)>(&mut self.conn().await)
-            .await
-            .expect("DB Query error");
-        rows.into_iter().map(|(ts, a)| (ts, a as i64)).collect()
-    }
-
-    // Cumulative-able events from agent_transaction_log for a given type.
-    // Returns signed amounts (negative = credits out, as stored). Used for
-    // realized trade profit ('trade_profit') and flying-fuel spend ('fuel').
-    async fn agent_transaction_events(&self, type_: &str) -> Vec<(chrono::DateTime<Utc>, i64)> {
-        agent_transaction_log::table
+    // Cumulative-able signed events from the journal for a category, returned as
+    // positive spend (credits out flipped positive). Used for the per-category
+    // expense lines on the dashboard.
+    async fn spend_events(&self, type_: &str) -> Vec<(chrono::DateTime<Utc>, i64)> {
+        let rows: Vec<(chrono::DateTime<Utc>, i64)> = agent_transaction_log::table
             .filter(agent_transaction_log::type_.eq(type_))
             .select((agent_transaction_log::ts, agent_transaction_log::amount))
             .order(agent_transaction_log::ts.asc())
             .load(&mut self.conn().await)
             .await
-            .expect("DB Query error")
+            .expect("DB Query error");
+        rows.into_iter().map(|(ts, amount)| (ts, -amount)).collect()
     }
 
-    // Realized trade profit events (proceeds - cost basis per sale), signed.
-    pub async fn realized_profit_events(&self) -> Vec<(chrono::DateTime<Utc>, i64)> {
-        self.agent_transaction_events("trade_profit").await
+    // Jump-gate antimatter spend (credits out): the credits charged on each jump.
+    pub async fn antimatter_spend_events(&self) -> Vec<(chrono::DateTime<Utc>, i64)> {
+        self.spend_events("jump").await
     }
 
-    // Flying-fuel spend events; stored negative (credits out), flipped positive.
+    // Flying-fuel spend events (refuel endpoint, credits out).
     pub async fn fuel_spend_events(&self) -> Vec<(chrono::DateTime<Utc>, i64)> {
-        self.agent_transaction_events("fuel")
+        self.spend_events("refuel").await
+    }
+
+    // Realized trade profit per sale (proceeds - cost basis), signed.
+    pub async fn realized_profit_events(&self) -> Vec<(chrono::DateTime<Utc>, i64)> {
+        let rows: Vec<(chrono::DateTime<Utc>, Option<i64>)> = agent_transaction_log::table
+            .filter(agent_transaction_log::type_.eq("trade_sell"))
+            .select((
+                agent_transaction_log::ts,
+                agent_transaction_log::realized_profit,
+            ))
+            .order(agent_transaction_log::ts.asc())
+            .load(&mut self.conn().await)
             .await
-            .into_iter()
-            .map(|(ts, amount)| (ts, -amount))
+            .expect("DB Query error");
+        rows.into_iter()
+            .map(|(ts, p)| (ts, p.unwrap_or(0)))
             .collect()
     }
 

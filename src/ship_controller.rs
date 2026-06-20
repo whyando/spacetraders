@@ -240,6 +240,7 @@ impl ShipController {
             .data;
         self.update_cargo(cargo);
         self.ctx.update_agent(agent);
+        let waypoint = transaction.waypoint_symbol.to_string();
         if _type == "purchase" {
             // Only register basis for trade-flow buys (adjust_reserved_credits);
             // construction/stockpile buys are consumed, not resold.
@@ -251,6 +252,19 @@ impl ShipController {
                     transaction.price_per_unit,
                 );
             }
+            self.ctx
+                .db
+                .record_cash_txn(crate::database::CashTxn {
+                    ts: transaction.timestamp,
+                    type_: "trade_buy",
+                    ship_symbol: Some(&self.ship_symbol),
+                    reference: Some(&transaction.trade_symbol),
+                    waypoint: Some(&waypoint),
+                    units: Some(transaction.units as i32),
+                    amount: -transaction.total_price,
+                    realized_profit: None,
+                })
+                .await;
         } else {
             // Realized profit on every sale = proceeds - cost basis of the units
             // sold (basis is 0 for mined/siphoned goods, so they're pure profit).
@@ -262,13 +276,16 @@ impl ShipController {
             );
             self.ctx
                 .db
-                .insert_agent_transaction(
-                    transaction.timestamp,
-                    "trade_profit",
-                    Some(&transaction.trade_symbol),
-                    Some(&transaction.waypoint_symbol.to_string()),
-                    realized,
-                )
+                .record_cash_txn(crate::database::CashTxn {
+                    ts: transaction.timestamp,
+                    type_: "trade_sell",
+                    ship_symbol: Some(&self.ship_symbol),
+                    reference: Some(&transaction.trade_symbol),
+                    waypoint: Some(&waypoint),
+                    units: Some(transaction.units as i32),
+                    amount: transaction.total_price,
+                    realized_profit: Some(realized),
+                })
                 .await;
         }
         self.debug(&format!(
@@ -394,13 +411,16 @@ impl ShipController {
         if !from_cargo {
             self.ctx
                 .db
-                .insert_agent_transaction(
-                    transaction.timestamp,
-                    "fuel",
-                    Some("FUEL"),
-                    Some(&transaction.waypoint_symbol.to_string()),
-                    -transaction.total_price,
-                )
+                .record_cash_txn(crate::database::CashTxn {
+                    ts: transaction.timestamp,
+                    type_: "refuel",
+                    ship_symbol: Some(&self.ship_symbol),
+                    reference: Some("FUEL"),
+                    waypoint: Some(&transaction.waypoint_symbol.to_string()),
+                    units: Some(transaction.units as i32),
+                    amount: -transaction.total_price,
+                    realized_profit: None,
+                })
                 .await;
         } else {
             // Consuming pre-bought fuel from cargo: clear any tracked basis.
@@ -495,10 +515,7 @@ impl ShipController {
             nav,
             cooldown,
             agent,
-            // Antimatter is bought at markets as cargo (captured via market
-            // transactions) and burned here; the jump transaction itself is not
-            // logged to avoid double-counting that spend.
-            transaction: _,
+            transaction,
         } = self
             .ctx
             .api_client
@@ -508,6 +525,23 @@ impl ShipController {
         self.update_nav(nav);
         self.ctx.update_agent(agent);
         self.update_cooldown(cooldown);
+        // The jump charges credits at the gate (antimatter cost). Journal it so
+        // the cash journal stays complete and the antimatter expense line is real.
+        if transaction.total_price != 0 {
+            self.ctx
+                .db
+                .record_cash_txn(crate::database::CashTxn {
+                    ts: transaction.timestamp,
+                    type_: "jump",
+                    ship_symbol: Some(&self.ship_symbol),
+                    reference: Some(&transaction.trade_symbol),
+                    waypoint: Some(&transaction.waypoint_symbol.to_string()),
+                    units: Some(transaction.units as i32),
+                    amount: -transaction.total_price,
+                    realized_profit: None,
+                })
+                .await;
+        }
     }
 
     pub async fn goto_waypoint(&self, target: &WaypointSymbol) {
@@ -794,6 +828,19 @@ impl ShipController {
             "{} Scrapped ship for ${}",
             self.ship_symbol, transaction.total_price
         );
+        self.ctx
+            .db
+            .record_cash_txn(crate::database::CashTxn {
+                ts: transaction.timestamp,
+                type_: "scrap",
+                ship_symbol: Some(&self.ship_symbol),
+                reference: None,
+                waypoint: Some(&transaction.waypoint_symbol.to_string()),
+                units: None,
+                amount: transaction.total_price,
+                realized_profit: None,
+            })
+            .await;
         self.ctx.update_agent(agent);
     }
 

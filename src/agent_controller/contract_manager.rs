@@ -91,13 +91,16 @@ impl ContractManager {
 
         self.ctx
             .db
-            .insert_agent_transaction(
-                chrono::Utc::now(),
-                txn_type,
-                Some(&contract_id),
-                None,
+            .record_cash_txn(crate::database::CashTxn {
+                ts: chrono::Utc::now(),
+                type_: txn_type,
+                ship_symbol: None,
+                reference: Some(&contract_id),
+                waypoint: None,
+                units: None,
                 amount,
-            )
+                realized_profit: None,
+            })
             .await;
 
         self.ctx.update_contract(contract);

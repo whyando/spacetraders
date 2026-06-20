@@ -314,6 +314,28 @@ impl AgentController {
     // Append a KPI snapshot for time-series analysis (equity curve, fleet size).
     async fn record_metrics(&self) {
         let credits = self.ctx.ledger.credits();
+        // Reconciliation: the cash journal must account for every credit moved.
+        // Compare the actual change in credits since this process's baseline tick
+        // against the sum of journal cash txns over the same window. A persistent,
+        // growing gap means some credit-moving path isn't going through
+        // record_cash_txn (exactly the blind spot that hid past credit drains).
+        let now = Utc::now();
+        let (base_ts, base_credits) = self.ctx.ledger.recon_baseline(now, credits);
+        if now > base_ts {
+            let journal_delta = self.ctx.db.cash_txn_sum_between(base_ts, now).await;
+            let actual_delta = credits - base_credits;
+            let gap = actual_delta - journal_delta;
+            if gap.abs() > 10_000 {
+                warn!(
+                    "Cash reconciliation gap: {} credits unaccounted since {} \
+                     (actual Δ {}, journal Δ {}). A credit-moving path may be \
+                     bypassing record_cash_txn.",
+                    gap, base_ts, actual_delta, journal_delta
+                );
+            } else {
+                debug!("Cash reconciliation OK (gap {} credits)", gap);
+            }
+        }
         let cargo_value = self.ctx.ledger.cargo_value();
         // net worth ~= liquid credits + in-transit cargo + ship cost basis
         let net_worth = credits + cargo_value + self.ctx.db.ship_cost_basis().await;
