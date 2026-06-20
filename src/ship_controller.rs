@@ -240,14 +240,36 @@ impl ShipController {
             .data;
         self.update_cargo(cargo);
         self.ctx.update_agent(agent);
-        if adjust_reserved_credits {
-            let units = if _type == "purchase" { units } else { -units };
-            self.ctx.ledger.register_goods_change(
+        if _type == "purchase" {
+            // Only register basis for trade-flow buys (adjust_reserved_credits);
+            // construction/stockpile buys are consumed, not resold.
+            if adjust_reserved_credits {
+                self.ctx.ledger.register_purchase(
+                    &self.ship_symbol,
+                    &transaction.trade_symbol,
+                    transaction.units,
+                    transaction.price_per_unit,
+                );
+            }
+        } else {
+            // Realized profit on every sale = proceeds - cost basis of the units
+            // sold (basis is 0 for mined/siphoned goods, so they're pure profit).
+            let realized = self.ctx.ledger.register_sale(
                 &self.ship_symbol,
                 &transaction.trade_symbol,
-                units,
+                transaction.units,
                 transaction.price_per_unit,
             );
+            self.ctx
+                .db
+                .insert_agent_transaction(
+                    transaction.timestamp,
+                    "trade_profit",
+                    Some(&transaction.trade_symbol),
+                    Some(&transaction.waypoint_symbol.to_string()),
+                    realized,
+                )
+                .await;
         }
         self.debug(&format!(
             "{} {} {} for ${} (total ${})",
@@ -359,13 +381,33 @@ impl ShipController {
             fuel,
             agent,
             cargo,
-            transaction: _,
+            transaction,
         } = self
             .ctx
             .api_client
             .post::<Data<RefuelResponse>, _>(&uri, &body)
             .await
             .data;
+        // Flying-fuel expense: market refuels cost credits (from_cargo refuels
+        // draw on already-bought cargo, so total_price is 0). Logged distinctly
+        // from FUEL bought as a trade good, which flows through realized profit.
+        if !from_cargo {
+            self.ctx
+                .db
+                .insert_agent_transaction(
+                    transaction.timestamp,
+                    "fuel",
+                    Some("FUEL"),
+                    Some(&transaction.waypoint_symbol.to_string()),
+                    -transaction.total_price,
+                )
+                .await;
+        } else {
+            // Consuming pre-bought fuel from cargo: clear any tracked basis.
+            self.ctx
+                .ledger
+                .register_consumption(&self.ship_symbol, "FUEL", (units + 99) / 100);
+        }
         self.update_fuel(fuel);
         assert_eq!(cargo.is_some(), from_cargo);
         if let Some(cargo) = cargo {
@@ -453,6 +495,9 @@ impl ShipController {
             nav,
             cooldown,
             agent,
+            // Antimatter is bought at markets as cargo (captured via market
+            // transactions) and burned here; the jump transaction itself is not
+            // logged to avoid double-counting that spend.
             transaction: _,
         } = self
             .ctx

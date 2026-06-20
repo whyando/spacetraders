@@ -17,6 +17,7 @@ use diesel::ExpressionMethods as _;
 use diesel::OptionalExtension as _;
 use diesel::QueryDsl as _;
 use diesel::QueryableByName;
+use diesel::TextExpressionMethods as _;
 use diesel::SelectableHelper as _;
 use diesel::sql_types::{BigInt, Integer, Nullable, Text};
 use diesel::upsert::excluded;
@@ -741,7 +742,10 @@ impl DbClient {
     // construction material (positive = credits out for a purchase, negative =
     // credits in for a sell). Used to back the gate-donation correction on the
     // dashboard's Total Profit line.
-    pub async fn construction_spend_events(&self) -> Vec<(chrono::DateTime<Utc>, i64)> {
+    pub async fn construction_spend_events(
+        &self,
+        callsign: &str,
+    ) -> Vec<(chrono::DateTime<Utc>, i64)> {
         #[derive(QueryableByName)]
         struct Row {
             #[diesel(sql_type = diesel::sql_types::Timestamptz)]
@@ -749,17 +753,71 @@ impl DbClient {
             #[diesel(sql_type = BigInt)]
             amount: i64,
         }
+        // ship_symbol LIKE 'CALLSIGN-%' excludes other agents' transactions,
+        // which the market feed includes when they trade at the same market.
         let rows: Vec<Row> = diesel::sql_query(
             "SELECT mt.timestamp AS ts, \
              (CASE WHEN mt.type='PURCHASE' THEN mt.total_price ELSE -mt.total_price END)::bigint AS amount \
              FROM market_transaction_log mt \
              WHERE mt.symbol IN (SELECT DISTINCT trade_symbol FROM construction_log) \
+             AND mt.ship_symbol LIKE $1 \
              ORDER BY mt.timestamp ASC",
         )
+        .bind::<Text, _>(format!("{}-%", callsign))
         .get_results(&mut self.conn().await)
         .await
         .expect("DB Query error");
         rows.into_iter().map(|r| (r.ts, r.amount)).collect()
+    }
+
+    // Jump-gate antimatter spend (credits out): every ANTIMATTER PURCHASE by our
+    // own ships. Antimatter is bought at markets as cargo then burned on jumps;
+    // we never resell it, so gross purchases are the true cost. Filtered by
+    // callsign to exclude other agents captured in the shared market feed.
+    pub async fn antimatter_spend_events(
+        &self,
+        callsign: &str,
+    ) -> Vec<(chrono::DateTime<Utc>, i64)> {
+        let rows: Vec<(chrono::DateTime<Utc>, i32)> = market_transaction_log::table
+            .filter(market_transaction_log::symbol.eq("ANTIMATTER"))
+            .filter(market_transaction_log::type_.eq("PURCHASE"))
+            .filter(market_transaction_log::ship_symbol.like(format!("{}-%", callsign)))
+            .select((
+                market_transaction_log::timestamp,
+                market_transaction_log::total_price,
+            ))
+            .order(market_transaction_log::timestamp.asc())
+            .load::<(chrono::DateTime<Utc>, i32)>(&mut self.conn().await)
+            .await
+            .expect("DB Query error");
+        rows.into_iter().map(|(ts, a)| (ts, a as i64)).collect()
+    }
+
+    // Cumulative-able events from agent_transaction_log for a given type.
+    // Returns signed amounts (negative = credits out, as stored). Used for
+    // realized trade profit ('trade_profit') and flying-fuel spend ('fuel').
+    async fn agent_transaction_events(&self, type_: &str) -> Vec<(chrono::DateTime<Utc>, i64)> {
+        agent_transaction_log::table
+            .filter(agent_transaction_log::type_.eq(type_))
+            .select((agent_transaction_log::ts, agent_transaction_log::amount))
+            .order(agent_transaction_log::ts.asc())
+            .load(&mut self.conn().await)
+            .await
+            .expect("DB Query error")
+    }
+
+    // Realized trade profit events (proceeds - cost basis per sale), signed.
+    pub async fn realized_profit_events(&self) -> Vec<(chrono::DateTime<Utc>, i64)> {
+        self.agent_transaction_events("trade_profit").await
+    }
+
+    // Flying-fuel spend events; stored negative (credits out), flipped positive.
+    pub async fn fuel_spend_events(&self) -> Vec<(chrono::DateTime<Utc>, i64)> {
+        self.agent_transaction_events("fuel")
+            .await
+            .into_iter()
+            .map(|(ts, amount)| (ts, -amount))
+            .collect()
     }
 
     pub async fn get_probe_jumpgate_reservations(

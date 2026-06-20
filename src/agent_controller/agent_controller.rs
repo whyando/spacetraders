@@ -141,6 +141,17 @@ impl AgentController {
             agent.credits
         };
         let ledger = Ledger::new(initial_credits);
+        // Restore in-transit cargo cost basis so a restart doesn't make the next
+        // sale of pre-restart cargo read as 100% profit.
+        if let Some(snapshot) = db
+            .get_value::<crate::agent_controller::ledger::LedgerSnapshot>(&format!(
+                "ledger/{}",
+                callsign
+            ))
+            .await
+        {
+            ledger.restore(snapshot);
+        }
         let state: AgentState = db
             .get_value(&format!("{}/state", callsign))
             .await
@@ -316,6 +327,15 @@ impl AgentController {
                 cargo_value,
                 self.num_ships() as i32,
                 net_worth,
+            )
+            .await;
+        // Persist cargo cost basis each tick so it survives a restart (cheap:
+        // a small map, written once per controller tick rather than per trade).
+        self.ctx
+            .db
+            .set_value(
+                &format!("ledger/{}", self.ctx.callsign),
+                &self.ctx.ledger.snapshot(),
             )
             .await;
     }

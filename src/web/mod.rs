@@ -147,21 +147,40 @@ struct HistoryPoint {
     ship_spend: i64,
     // cumulative net credits spent on construction materials up to this point
     construction_spend: i64,
+    // cumulative credits spent refueling for flight (refuel endpoint) so far
+    fuel_spend: i64,
+    // cumulative credits spent on jump-gate antimatter so far
+    antimatter_spend: i64,
+    // cumulative realized trade profit so far (per-sale: proceeds - cost basis)
+    realized_trade_profit: i64,
+    // realized_trade_profit - all expense lines (fuel, antimatter, construction,
+    // ships): the agent's actual bottom-line profit from operations
+    net_profit: i64,
     // (net_worth - baseline) + cumulative construction spend, so jump-gate
-    // donations don't appear as losses on the chart
+    // donations don't appear as losses on the chart. Kept as a cross-check.
     total_profit: i64,
 }
 
 async fn api_history(State(s): State<AppState>) -> Json<Vec<HistoryPoint>> {
+    let callsign = s.controller.agent().symbol;
     let metrics = s.db.get_metrics_history(5000).await;
     let ship_spend_events = s.db.ship_spend_events().await;
-    let construction_events = s.db.construction_spend_events().await;
+    let construction_events = s.db.construction_spend_events(&callsign).await;
+    let fuel_events = s.db.fuel_spend_events().await;
+    let antimatter_events = s.db.antimatter_spend_events(&callsign).await;
+    let profit_events = s.db.realized_profit_events().await;
     let baseline = metrics.first().map(|m| m.net_worth).unwrap_or(0);
     // Walk all ascending series together, accumulating onto the metrics timeline.
     let mut ship_idx = 0;
     let mut cumulative_ship_spend = 0i64;
     let mut cons_idx = 0;
     let mut cumulative_construction_spend = 0i64;
+    let mut fuel_idx = 0;
+    let mut cumulative_fuel_spend = 0i64;
+    let mut anti_idx = 0;
+    let mut cumulative_antimatter_spend = 0i64;
+    let mut profit_idx = 0;
+    let mut cumulative_realized_profit = 0i64;
     let points = metrics
         .into_iter()
         .map(|m| {
@@ -173,6 +192,23 @@ async fn api_history(State(s): State<AppState>) -> Json<Vec<HistoryPoint>> {
                 cumulative_construction_spend += construction_events[cons_idx].1;
                 cons_idx += 1;
             }
+            while fuel_idx < fuel_events.len() && fuel_events[fuel_idx].0 <= m.ts {
+                cumulative_fuel_spend += fuel_events[fuel_idx].1;
+                fuel_idx += 1;
+            }
+            while anti_idx < antimatter_events.len() && antimatter_events[anti_idx].0 <= m.ts {
+                cumulative_antimatter_spend += antimatter_events[anti_idx].1;
+                anti_idx += 1;
+            }
+            while profit_idx < profit_events.len() && profit_events[profit_idx].0 <= m.ts {
+                cumulative_realized_profit += profit_events[profit_idx].1;
+                profit_idx += 1;
+            }
+            let net_profit = cumulative_realized_profit
+                - cumulative_fuel_spend
+                - cumulative_antimatter_spend
+                - cumulative_construction_spend
+                - cumulative_ship_spend;
             HistoryPoint {
                 ts: m.ts.to_rfc3339(),
                 credits: m.credits,
@@ -180,6 +216,10 @@ async fn api_history(State(s): State<AppState>) -> Json<Vec<HistoryPoint>> {
                 num_ships: m.num_ships,
                 ship_spend: cumulative_ship_spend,
                 construction_spend: cumulative_construction_spend,
+                fuel_spend: cumulative_fuel_spend,
+                antimatter_spend: cumulative_antimatter_spend,
+                realized_trade_profit: cumulative_realized_profit,
+                net_profit,
                 total_profit: (m.net_worth - baseline) + cumulative_construction_spend,
             }
         })
