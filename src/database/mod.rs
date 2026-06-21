@@ -379,6 +379,40 @@ impl DbClient {
             .expect("DB Query error")
     }
 
+    // Record that a market was observed at this instant, whether or not any
+    // values changed. market_trades only stores changes; this is the full record
+    // of sample times, used to draw per-observation ticks on the dashboard chart.
+    pub async fn insert_market_observation(&self, market: &WithTimestamp<Market>) {
+        diesel::insert_into(market_observations::table)
+            .values((
+                market_observations::timestamp.eq(market.timestamp),
+                market_observations::market_symbol.eq(market.data.symbol.to_string()),
+            ))
+            .on_conflict((
+                market_observations::market_symbol,
+                market_observations::timestamp,
+            ))
+            .do_nothing()
+            .execute(&mut self.conn().await)
+            .await
+            .expect("DB Insert error");
+    }
+
+    // All times a market was observed (ascending). Applies to every good at the
+    // market, since a single observation samples the whole market at once.
+    pub async fn market_observation_times(
+        &self,
+        market: &WaypointSymbol,
+    ) -> Vec<chrono::DateTime<Utc>> {
+        market_observations::table
+            .filter(market_observations::market_symbol.eq(market.to_string()))
+            .select(market_observations::timestamp)
+            .order(market_observations::timestamp.asc())
+            .load(&mut self.conn().await)
+            .await
+            .expect("DB Query error")
+    }
+
     // Our own buy/sell transactions at a market (ascending), read from the cash
     // journal. Type is normalized to PURCHASE/SELL for the dashboard view.
     pub async fn market_transactions(

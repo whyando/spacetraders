@@ -72,6 +72,13 @@ diesel::table! {
 }
 
 diesel::table! {
+    market_observations (market_symbol, timestamp) {
+        timestamp -> Timestamptz,
+        market_symbol -> Text,
+    }
+}
+
+diesel::table! {
     markets (waypoint_symbol) {
         waypoint_symbol -> Text,
         market_data -> Jsonb,
@@ -162,6 +169,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     construction_log,
     generic_lookup,
     jumpgate_connections,
+    market_observations,
     market_trades,
     markets,
     remote_markets,

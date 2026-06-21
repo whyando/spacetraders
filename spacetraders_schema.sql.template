@@ -33,6 +33,17 @@ CREATE TABLE IF NOT EXISTS ___SCHEMA___.market_trades (
 SELECT public.create_hypertable('___SCHEMA___.market_trades', 'timestamp', if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS market_trades_lookup ON ___SCHEMA___.market_trades (market_symbol, symbol, "timestamp");
 
+-- market_observations (one row each time a market is observed, even when nothing
+-- changed). market_trades only records changes, so this is the record of when a
+-- market was actually sampled, used to draw per-sample ticks on the dashboard.
+CREATE TABLE IF NOT EXISTS ___SCHEMA___.market_observations (
+    "timestamp"   timestamp with time zone NOT NULL,
+    market_symbol text NOT NULL,
+    PRIMARY KEY (market_symbol, "timestamp")
+);
+SELECT public.create_hypertable('___SCHEMA___.market_observations', 'timestamp', if_not_exists => TRUE);
+CREATE INDEX IF NOT EXISTS market_observations_lookup ON ___SCHEMA___.market_observations (market_symbol, "timestamp");
+
 -- jumpgate_connections
 CREATE TABLE IF NOT EXISTS ___SCHEMA___.jumpgate_connections (
     waypoint_symbol text NOT NULL,

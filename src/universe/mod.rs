@@ -271,6 +271,7 @@ impl Universe {
             .insert(waypoint_symbol.clone(), Arc::new(market.clone()));
         self.db.save_market(waypoint_symbol, &market).await;
         self.db.insert_market_trades(&market).await;
+        self.db.insert_market_observation(&market).await;
     }
 
     pub fn get_shipyard(

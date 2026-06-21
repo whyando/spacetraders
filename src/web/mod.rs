@@ -553,6 +553,9 @@ struct MarketDetailView {
     waypoint: String,
     system: String,
     goods: Vec<MarketGoodView>,
+    // Every time this market was observed (rfc3339, ascending), whether or not
+    // any good changed. Shared across all goods; used for per-sample chart ticks.
+    observations: Vec<String>,
 }
 
 // One market's current goods plus supply/price history and our own transactions,
@@ -568,6 +571,7 @@ async fn api_market(
                 waypoint,
                 system: String::new(),
                 goods: vec![],
+                observations: vec![],
             });
         }
     };
@@ -647,9 +651,18 @@ async fn api_market(
         })
         .collect();
 
+    let observations = s
+        .db
+        .market_observation_times(&wp)
+        .await
+        .into_iter()
+        .map(|ts| ts.to_rfc3339())
+        .collect();
+
     Json(MarketDetailView {
         waypoint: wp.to_string(),
         system,
         goods,
+        observations,
     })
 }
