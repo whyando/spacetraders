@@ -118,6 +118,10 @@ impl AgentController {
         let contract: Option<Contract> = api_client.get_contract().await;
 
         let system_symbol = agent.lock().unwrap().headquarters.system();
+        // Loads the starting system and warms its waypoint/market/shipyard
+        // caches before the controller starts, so the first try_buy_ships pass
+        // (generate_ship_config, under the buy-lock) hits cache instead of doing
+        // ~30 serial API round-trips and stalling the lock past its timeout.
         universe.ensure_system_loaded(&system_symbol).await;
 
         let job_assignments: DashMap<String, String> = db

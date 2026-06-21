@@ -364,10 +364,25 @@ impl Universe {
         self.factions.iter().map(|x| x.value().clone()).collect()
     }
 
+    // Load a system and warm its per-waypoint detail, market, and shipyard
+    // caches. Consumers like FleetManager::generate_ship_config run under the
+    // buy-lock and would otherwise do ~30 serial API round-trips on a cold
+    // cache, stalling the lock past its timeout. Idempotent: the system load is
+    // skipped when already cached, and each warm-up getter checks its own
+    // cache/DB first (e.g. after a restart).
     pub async fn ensure_system_loaded(&self, symbol: &SystemSymbol) {
+        let start = std::time::Instant::now();
         if !self.systems.contains_key(symbol) {
             self.load_system(symbol).await;
         }
+        self.get_system_waypoints(symbol).await;
+        self.get_system_markets_remote(symbol).await;
+        self.get_system_shipyards_remote(symbol).await;
+        info!(
+            "Loaded + primed caches for {} in {:.1}s",
+            symbol,
+            start.elapsed().as_secs_f64()
+        );
     }
 
     // Fetch system info from API, insert to database and cache
