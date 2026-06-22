@@ -40,6 +40,15 @@ impl ExplorationManager {
 
         let _lock = self.probe_reserve_mutex_guard.lock().await;
         let start = self.ctx.universe.get_jumpgate(&ship_loc.system()).await;
+        // The home gate's own connections seed the entire frontier, but nothing
+        // charts them up front: a probe only charts gates it *reaches*, and it can't
+        // reach anything until the home gate has outgoing edges in the graph. Chart it
+        // on demand here (under the reserve lock, so only the first probe does the
+        // work). get_jumpgate_connections also invalidates the cached graph, so an
+        // idle probe picks up targets the moment the home gate finishes construction.
+        if !self.ctx.universe.connections_known(&start) {
+            self.ctx.universe.get_jumpgate_connections(&start).await;
+        }
         let graph = self.ctx.universe.jumpgate_graph().await;
         let reachables = dijkstra_all(&start, |node| {
             graph.get(node).unwrap().active_connections.clone()
