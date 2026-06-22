@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 use crate::agent_controller::AgentEra;
-use crate::models::SystemSymbol;
+use crate::models::{SystemSymbol, WaypointSymbol};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -19,10 +19,13 @@ pub struct Config {
     // stationed at every market and shipyard waypoint. Parsed from INTEL_SYSTEMS
     // (comma-separated system symbols, e.g. "X1-NX57,X1-AB12").
     pub intel_systems: Vec<SystemSymbol>,
-    // One-time remote-system survey: the command frigate (fast + sensor array) routes
-    // to this system, scans to reveal every waypoint's traits, snapshots the markets/
-    // shipyards, then resumes trading. Parsed from SURVEY_SYSTEM (a single symbol).
+    // One-time remote-system survey: an explorer (fast + sensor array) routes to this
+    // system and scans once to reveal every waypoint's traits. Parsed from SURVEY_SYSTEM.
     pub survey_system: Option<SystemSymbol>,
+    // Bootstrap an explorer: the shipyard waypoint to buy a SHIP_EXPLORER from (a faction
+    // capital, e.g. X1-XQ60-A2). A purchaser probe is stationed there and the explorer is
+    // bought, then runs the survey. Parsed from EXPLORER_SHIPYARD (a single waypoint).
+    pub explorer_shipyard: Option<WaypointSymbol>,
 }
 
 lazy_static! {
@@ -77,6 +80,12 @@ lazy_static! {
             }
             _ => None,
         };
+        let explorer_shipyard = match std::env::var("EXPLORER_SHIPYARD") {
+            Ok(val) if !val.trim().is_empty() => {
+                Some(WaypointSymbol::new(val.trim()))
+            }
+            _ => None,
+        };
         Config {
             api_base_url,
             job_id_filter,
@@ -89,6 +98,7 @@ lazy_static! {
             disable_contract_tasks,
             intel_systems,
             survey_system,
+            explorer_shipyard,
         }
     };
 }

@@ -589,6 +589,68 @@ impl Universe {
         }
     }
 
+    // Record that a waypoint is a market and/or shipyard — e.g. after successfully
+    // refreshing one there. The startup waypoint snapshot can predate a waypoint being
+    // charted (faction capitals get charted by NPCs after our load) and never updates, so
+    // search_shipyards / intel filters would otherwise never see it. OR-s the flags in;
+    // no-op if already known.
+    pub async fn note_waypoint_traits(
+        &self,
+        waypoint: &WaypointSymbol,
+        is_market: bool,
+        is_shipyard: bool,
+    ) {
+        let system_symbol = waypoint.system();
+        let (wp_id, details) = {
+            let Some(mut s) = self.systems.get_mut(&system_symbol) else {
+                return;
+            };
+            let Some(wp) = s
+                .value_mut()
+                .waypoints
+                .iter_mut()
+                .find(|w| &w.symbol == waypoint)
+            else {
+                return;
+            };
+            let cur = wp.details.clone();
+            let (m, y, unch, con) = match &cur {
+                Some(d) => (d.is_market, d.is_shipyard, d.is_uncharted, d.is_under_construction),
+                None => (false, false, false, false),
+            };
+            let new_market = m || is_market;
+            let new_shipyard = y || is_shipyard;
+            if cur.is_some() && new_market == m && new_shipyard == y {
+                return; // already known — avoid a hot-path DB write
+            }
+            let details = WaypointDetails {
+                is_market: new_market,
+                is_shipyard: new_shipyard,
+                is_uncharted: unch,
+                is_under_construction: con,
+            };
+            wp.details = Some(details.clone());
+            (wp.id, details)
+        };
+        diesel::insert_into(waypoint_details::table)
+            .values(NewWaypointDetails {
+                waypoint_id: wp_id,
+                is_market: details.is_market,
+                is_shipyard: details.is_shipyard,
+                is_uncharted: details.is_uncharted,
+                is_under_construction: details.is_under_construction,
+            })
+            .on_conflict(waypoint_details::waypoint_id)
+            .do_update()
+            .set((
+                waypoint_details::is_market.eq(details.is_market),
+                waypoint_details::is_shipyard.eq(details.is_shipyard),
+            ))
+            .execute(&mut self.db.conn().await)
+            .await
+            .expect("DB Insert error");
+    }
+
     pub async fn get_system_markets(
         &self,
         symbol: &SystemSymbol,

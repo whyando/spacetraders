@@ -3,4 +3,4 @@ name: spacetraders
 description: A Helm chart for SpaceTraders game client
 type: application
 version: 0.3.24
-appVersion: "0.5.34"
+appVersion: "0.5.35"

@@ -125,6 +125,7 @@ pub enum ShipBehaviour {
     ConstructionHauler,
     JumpgateProbe,
     Explorer,
+    Survey,
 }
 
 #[derive(Debug, Clone)]

@@ -491,6 +491,37 @@ impl FleetManager {
                     });
                 }
             }
+
+            // Bootstrap a SHIP_EXPLORER (fast + sensor array + warp) from a faction-capital
+            // shipyard, then have it survey-scan remote systems. A purchaser probe parks at
+            // the shipyard, refreshing it so the agent learns it sells explorers and can
+            // transact there (note_waypoint_traits); the explorer is bought once and runs
+            // the Survey behaviour against SURVEY_SYSTEM.
+            if let Some(shipyard) = &CONFIG.explorer_shipyard {
+                ships.push(ShipConfig {
+                    id: format!("explorer_purchaser/{}", shipyard),
+                    ship_model: "SHIP_PROBE".to_string(),
+                    purchase_criteria: PurchaseCriteria {
+                        allow_logistic_task: true,
+                        require_cheapest: false,
+                        ..PurchaseCriteria::default()
+                    },
+                    behaviour: ShipBehaviour::Probe(ProbeScriptConfig {
+                        waypoints: vec![shipyard.clone()],
+                        refresh_market: true,
+                    }),
+                });
+                ships.push(ShipConfig {
+                    id: "survey_explorer".to_string(),
+                    ship_model: "SHIP_EXPLORER".to_string(),
+                    purchase_criteria: PurchaseCriteria {
+                        system_symbol: Some(shipyard.system()),
+                        require_cheapest: false,
+                        ..PurchaseCriteria::default()
+                    },
+                    behaviour: ShipBehaviour::Survey,
+                });
+            }
         }
         ships
     }
@@ -764,6 +795,9 @@ impl FleetManager {
                             ship_scripts::exploration::run_explorer(ship_controller, db, ac).await;
                         })
                     }
+                    ShipBehaviour::Survey => tokio::spawn(async move {
+                        ship_scripts::survey::run_scanner(ship_controller).await;
+                    }),
                 };
                 let name = format!("{}:{}", ship_symbol, job_spec.id);
                 self.hdls.push(&name, join_hdl);

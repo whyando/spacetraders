@@ -649,6 +649,8 @@ impl ShipController {
             data: response.data,
         };
         self.ctx.universe.save_market(&waypoint, market).await;
+        // Refreshing here proves it's a market; learn the trait in case our cache was stale.
+        self.ctx.universe.note_waypoint_traits(&waypoint, true, false).await;
     }
 
     pub async fn refresh_shipyard(&self) {
@@ -663,6 +665,9 @@ impl ShipController {
             data: response.data,
         };
         self.ctx.universe.save_shipyard(&waypoint, shipyard).await;
+        // Refreshing here proves it's a shipyard; learn the trait so search_shipyards (and
+        // thus remote purchasing) can find it even if our startup snapshot was stale.
+        self.ctx.universe.note_waypoint_traits(&waypoint, false, true).await;
     }
 
     pub async fn survey(&self) {

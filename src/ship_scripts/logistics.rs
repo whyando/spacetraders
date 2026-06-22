@@ -1,7 +1,7 @@
 use std::{cmp::min, sync::Arc};
 
 use crate::{
-    agent_controller::AgentController, config::CONFIG, logistics_planner::Action,
+    agent_controller::AgentController, logistics_planner::Action,
     models::LogisticsScriptConfig, ship_controller::ShipController,
     tasks::LogisticTaskManager,
 };
@@ -15,22 +15,6 @@ pub async fn run(
 ) {
     info!("Starting script logistics for {}", ship_controller.symbol());
     ship_controller.wait_for_transit().await;
-
-    // The planner ship (command frigate) runs the one-time remote-system survey before
-    // settling into trading: it's our fastest ship and the only one with a sensor array.
-    if config.use_planner {
-        if let Some(system) = CONFIG.survey_system.clone() {
-            crate::ship_scripts::survey::run_survey(&ship_controller, &system).await;
-        }
-        // Safety: if a prior survey was interrupted mid-trip, get home before registering
-        // with the home-system task planner (which keys off the ship's current system).
-        let home = ship_controller.ctx.starting_system();
-        if ship_controller.system() != home {
-            let home_gate = ship_controller.ctx.universe.get_jumpgate(&home).await;
-            crate::ship_scripts::probe::goto_waypoint_anywhere(&ship_controller, &home_gate)
-                .await;
-        }
-    }
 
     let ship_symbol = ship_controller.symbol();
     let system_symbol = ship_controller.system();
