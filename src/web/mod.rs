@@ -366,6 +366,9 @@ struct UniverseSystemNode {
     gate_charted: bool,
     // gate is still under construction (can't be jumped to)
     gate_under_construction: bool,
+    // symbols of factions headquartered in this system (usually empty)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    faction_hqs: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -383,6 +386,13 @@ struct UniverseMap {
 async fn api_universe(State(s): State<AppState>) -> Json<UniverseMap> {
     let u = &s.controller.ctx.universe;
     let systems = u.systems();
+    // Map each system to the faction(s) headquartered there.
+    let mut hqs: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for faction in u.get_factions() {
+        if let Some(hq) = &faction.headquarters {
+            hqs.entry(hq.to_string()).or_default().push(faction.symbol);
+        }
+    }
     let mut nodes = Vec::with_capacity(systems.len());
     let mut known: BTreeSet<String> = BTreeSet::new();
     let mut num_gates = 0;
@@ -410,6 +420,7 @@ async fn api_universe(State(s): State<AppState>) -> Json<UniverseMap> {
             has_gate,
             gate_charted,
             gate_under_construction,
+            faction_hqs: hqs.remove(&sys.symbol.to_string()).unwrap_or_default(),
         });
     }
     // Undirected, deduped edges between systems with known coordinates.
