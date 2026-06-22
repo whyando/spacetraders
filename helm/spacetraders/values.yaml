@@ -3,7 +3,10 @@ replicaCount: 1
 image:
   repository: registry.whyando.com/whyando/spacetraders
   pullPolicy: IfNotPresent
-  tag: "0.5.11"
+  # Defaults to the chart's appVersion (kept in lockstep with Cargo.toml on each
+  # release), so a version bump + helm upgrade tracks the image automatically.
+  # Override only to pin a specific tag.
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""
