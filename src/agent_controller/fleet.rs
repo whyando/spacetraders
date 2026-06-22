@@ -458,6 +458,39 @@ impl FleetManager {
                     behaviour: ShipBehaviour::JumpgateProbe,
                 });
             }
+
+            // Remote-system market/shipyard intelligence: station a static probe at every
+            // market and shipyard in each configured intel system. Probes self-route across
+            // the jump-gate network (probe::goto_waypoint_anywhere) and refresh on arrival,
+            // giving live prices + ship listings there. Only deploy once the target's gate is
+            // charted — otherwise there's no route and the probes would just wait.
+            for system in &CONFIG.intel_systems {
+                let Some(gate) = self.ctx.universe.get_jumpgate_opt(system).await else {
+                    continue;
+                };
+                if !self.ctx.universe.connections_known(&gate) {
+                    continue;
+                }
+                let waypoints = self.ctx.universe.get_system_waypoints(system).await;
+                for w in waypoints
+                    .iter()
+                    .filter(|w| w.is_market() || w.is_shipyard())
+                {
+                    ships.push(ShipConfig {
+                        id: format!("intel_probe/{}", w.symbol),
+                        ship_model: "SHIP_PROBE".to_string(),
+                        purchase_criteria: PurchaseCriteria {
+                            allow_logistic_task: true,
+                            require_cheapest: false,
+                            ..PurchaseCriteria::default()
+                        },
+                        behaviour: ShipBehaviour::Probe(ProbeScriptConfig {
+                            waypoints: vec![w.symbol.clone()],
+                            refresh_market: true,
+                        }),
+                    });
+                }
+            }
         }
         ships
     }

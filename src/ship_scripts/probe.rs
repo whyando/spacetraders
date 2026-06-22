@@ -1,12 +1,61 @@
-use crate::{models::ProbeScriptConfig, ship_controller::ShipController};
+use crate::{
+    models::{ProbeScriptConfig, WaypointSymbol},
+    ship_controller::ShipController,
+};
 use chrono::{DateTime, Duration, Utc};
 use lazy_static::lazy_static;
 use log::*;
+use pathfinding::directed::dijkstra::dijkstra;
 use std::ops::Add as _;
 
 lazy_static! {
     static ref MARKET_REFRESH_INTERVAL: Duration = Duration::try_minutes(6).unwrap();
     static ref SHIPYARD_REFRESH_INTERVAL: Duration = Duration::try_minutes(60).unwrap();
+}
+
+// Navigate to `target`, hopping gate-to-gate across the charted jump-gate network when
+// it's in another system (the home-system probes that started this code only ever do a
+// single jump). If the destination isn't reachable yet — its gate, or a gate on the
+// path, hasn't been charted — wait and retry rather than panicking, since the frontier
+// is still being charted by the jumpgate probes.
+async fn goto_waypoint_anywhere(ship: &ShipController, target: &WaypointSymbol) {
+    let target_system = target.system();
+    loop {
+        if ship.system() == target_system {
+            ship.goto_waypoint(target).await;
+            return;
+        }
+        let start_gate = ship.ctx.universe.get_jumpgate(&ship.system()).await;
+        let dest_gate = ship.ctx.universe.get_jumpgate(&target_system).await;
+        let graph = ship.ctx.universe.jumpgate_graph().await;
+        let route = dijkstra(
+            &start_gate,
+            |node| {
+                graph
+                    .get(node)
+                    .map(|n| n.active_connections.clone())
+                    .unwrap_or_default()
+            },
+            |node| node == &dest_gate,
+        );
+        match route {
+            Some((path, _)) => {
+                ship.goto_waypoint(&start_gate).await;
+                for gate in path.iter().skip(1) {
+                    ship.jump(gate).await;
+                }
+                ship.goto_waypoint(target).await;
+                return;
+            }
+            None => {
+                ship.set_state_description(&format!(
+                    "Waiting for a jump route to {}",
+                    target_system
+                ));
+                tokio::time::sleep(tokio::time::Duration::from_secs(120)).await;
+            }
+        }
+    }
 }
 
 pub async fn run(ship_controller: ShipController, config: &ProbeScriptConfig) {
@@ -98,23 +147,8 @@ pub async fn probe_single_location(ship_controller: ShipController, config: &Pro
         .detailed_waypoint(waypoint_symbol)
         .await;
 
-    if ship_controller.system() != waypoint.system_symbol {
-        let jumpgate_src = ship_controller
-            .ctx
-            .universe
-            .get_jumpgate(&ship_controller.system())
-            .await;
-        let jumpgate_dest = ship_controller
-            .ctx
-            .universe
-            .get_jumpgate(&waypoint.system_symbol)
-            .await;
-        ship_controller.goto_waypoint(&jumpgate_src).await;
-        // jump to correct system
-        ship_controller.jump(&jumpgate_dest).await;
-    }
-
-    ship_controller.goto_waypoint(waypoint_symbol).await;
+    // Route to the waypoint, jumping across systems as needed (may be several gates away).
+    goto_waypoint_anywhere(&ship_controller, waypoint_symbol).await;
     ship_controller.dock().await; // don't need to dock, but do so anyway to clear 'InTransit' status
 
     if !config.refresh_market {
