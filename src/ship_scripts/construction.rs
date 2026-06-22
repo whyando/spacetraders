@@ -9,6 +9,7 @@ use crate::models::MarketActivity::*;
 use crate::models::MarketSupply::*;
 use crate::models::MarketType::*;
 use crate::{
+    agent_controller::AgentController,
     database::DbClient,
     models::{Construction, WaypointSymbol},
     ship_controller::ShipController,
@@ -63,7 +64,7 @@ enum ConstructionHaulerState {
     TerminalState,
 }
 
-pub async fn run_hauler(ship: ShipController, db: DbClient) {
+pub async fn run_hauler(ship: ShipController, db: DbClient, ac: AgentController) {
     info!("Starting script construction_hauler for {}", ship.symbol());
     ship.wait_for_transit().await;
 
@@ -74,11 +75,14 @@ pub async fn run_hauler(ship: ShipController, db: DbClient) {
     let key = format!("construction_state/{}", ship.symbol());
     let mut state: ConstructionHaulerState = db.get_value(&key).await.unwrap_or(Buying);
 
-    // if state == TerminalState {
-    //     ship.refresh_shipyard().await;
-    // }
-
-    while state != TerminalState {
+    loop {
+        // Once the gate is built (era advanced past the home build-out) this dedicated
+        // hauler is no longer needed — scrap it. Same era cue the mining/siphon fleet
+        // retires on, so the ship-config gate (never_purchase) and this scrap can't
+        // disagree and rebuy-churn.
+        if super::home_phase_done(&ac) {
+            return super::scrap::run(ship).await;
+        }
         let next_state = tick(
             &ship,
             state,
@@ -197,32 +201,14 @@ async fn tick(
             }
             None
         }
-        Completed => {
-            // Disable this logic, no direct jump to capital system
-            // // After completing the gate, navigate through the gate to the capital system
-            // let shipyard = get_probe_shipyard(ship).await;
-            // ship.debug(&format!(
-            //     "Jumpgate is completed. Navigating to shipyard {}",
-            //     shipyard
-            // ));
-            // if ship.system() != shipyard.system() {
-            //     // Assume we can do a single jump to the correct system
-            //     // nav to jumpgate
-            //     let jumpgate_src = ship.universe.get_jumpgate(&ship.system()).await;
-            //     let jumpgate_dest = ship.universe.get_jumpgate(&shipyard.system()).await;
-            //     ship.goto_waypoint(&jumpgate_src).await;
-            //     // jump to correct system
-            //     ship.jump(&jumpgate_dest).await;
-            // }
-            // ship.goto_waypoint(&shipyard).await;
-            // ship.refresh_shipyard().await;
-            // ship.debug(
-            //     "Jumpgate is completed + navigating to shipyard complete. Entering terminal state.",
-            // );
-            Some(TerminalState)
-        }
-        TerminalState => {
-            panic!("Invalid state");
+        Completed | TerminalState => {
+            // Gate is built; nothing left to haul. The actual scrap is left to
+            // run_hauler's era check (so we don't scrap-then-rebuy in the brief window
+            // before the era advances). Idle until then. TerminalState is a legacy
+            // value from older runs, handled the same way.
+            ship.set_state_description("Gate built; awaiting scrap");
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            None
         }
     }
 }

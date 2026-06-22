@@ -1,6 +1,6 @@
 use crate::{
-    database::DbClient, models::WaypointSymbol, ship_controller::ShipController,
-    universe::WaypointFilter,
+    agent_controller::AgentController, database::DbClient, models::WaypointSymbol,
+    ship_controller::ShipController, universe::WaypointFilter,
 };
 use SiphonShuttleState::*;
 use lazy_static::lazy_static;
@@ -40,7 +40,7 @@ async fn sell_location(ship: &ShipController) -> WaypointSymbol {
     waypoints[0].symbol.clone()
 }
 
-pub async fn run_drone(ship: ShipController) {
+pub async fn run_drone(ship: ShipController, ac: AgentController) {
     info!("Starting script siphon_drone for {}", ship.symbol());
     ship.wait_for_transit().await;
 
@@ -48,6 +48,9 @@ pub async fn run_drone(ship: ShipController) {
     ship.goto_waypoint(&siphon_location).await;
 
     loop {
+        if super::home_phase_done(&ac) {
+            return super::scrap::run(ship).await;
+        }
         let should_siphon = ship.cargo_space_available() > 0;
         if should_siphon {
             ship.siphon().await;
@@ -67,7 +70,7 @@ enum SiphonShuttleState {
     Selling,
 }
 
-pub async fn run_shuttle(ship: ShipController, db: DbClient) {
+pub async fn run_shuttle(ship: ShipController, db: DbClient, ac: AgentController) {
     info!("Starting script siphon_shuttle for {}", ship.symbol());
     ship.wait_for_transit().await;
 
@@ -78,6 +81,9 @@ pub async fn run_shuttle(ship: ShipController, db: DbClient) {
     let mut state: SiphonShuttleState = db.get_value(&key).await.unwrap_or(Loading);
 
     loop {
+        if super::home_phase_done(&ac) {
+            return super::scrap::run(ship).await;
+        }
         match state {
             Loading => {
                 if ship.cargo_space_available() == 0 {

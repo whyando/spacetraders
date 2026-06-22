@@ -1,5 +1,6 @@
 use std::cmp::min;
 
+use crate::agent_controller::AgentController;
 use crate::api_client::api_models::WaypointDetailed;
 use crate::models::MarketType::*;
 use crate::ship_controller::ShipController;
@@ -56,7 +57,7 @@ async fn engineered_asteroid_location(ship: &ShipController) -> WaypointSymbol {
     waypoints[0].symbol.clone()
 }
 
-pub async fn run_surveyor(ship: ShipController) {
+pub async fn run_surveyor(ship: ShipController, ac: AgentController) {
     info!("Starting script surveyor for {}", ship.symbol());
     ship.wait_for_transit().await;
 
@@ -64,12 +65,15 @@ pub async fn run_surveyor(ship: ShipController) {
     ship.goto_waypoint(&asteroid_location).await;
 
     loop {
+        if super::home_phase_done(&ac) {
+            return super::scrap::run(ship).await;
+        }
         // Automatically pushes to the survey manager
         ship.survey().await;
     }
 }
 
-pub async fn run_mining_drone(ship: ShipController) {
+pub async fn run_mining_drone(ship: ShipController, ac: AgentController) {
     info!("Starting script extraction_drone for {}", ship.symbol());
     ship.wait_for_transit().await;
 
@@ -77,6 +81,9 @@ pub async fn run_mining_drone(ship: ShipController) {
     ship.goto_waypoint(&asteroid_location).await;
 
     loop {
+        if super::home_phase_done(&ac) {
+            return super::scrap::run(ship).await;
+        }
         let should_extract = ship.cargo_space_available() >= 4;
         if should_extract {
             // wait for cooldown before taking survey, helps to get a non-exhausted one
@@ -123,7 +130,7 @@ lazy_static! {
     static ref JETTISON_GOODS: Vec<&'static str> = vec!["ICE_WATER", "ALUMINUM_ORE",];
 }
 
-pub async fn run_shuttle(ship: ShipController, db: DbClient) {
+pub async fn run_shuttle(ship: ShipController, db: DbClient, ac: AgentController) {
     info!("Starting script extraction shuttle for {}", ship.symbol());
     ship.wait_for_transit().await;
 
@@ -133,6 +140,9 @@ pub async fn run_shuttle(ship: ShipController, db: DbClient) {
     let mut state: MiningShuttleState = db.get_value(&key).await.unwrap_or(Loading);
 
     loop {
+        if super::home_phase_done(&ac) {
+            return super::scrap::run(ship).await;
+        }
         match state {
             Loading => {
                 if ship.cargo_space_available() == 0 {

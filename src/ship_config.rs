@@ -32,6 +32,11 @@ pub fn ship_config_starter_system(
     _shipyards: &[ShipyardRemoteView],
     use_nonstatic_probes: bool,
     incl_outer_and_siphons: bool,
+    // The home-system build-out fleet (mining, siphon, construction hauler) is bought and
+    // run while building the gate (in_home_phase); once past the gate its slots are kept
+    // as never_purchase so any leftover ships stay assigned and self-scrap (see the
+    // mining/siphon/construction scripts).
+    in_home_phase: bool,
 ) -> Vec<ShipConfig> {
     let mut ships = vec![];
 
@@ -110,7 +115,14 @@ pub fn ship_config_starter_system(
         ));
     }
 
-    // Mining operation
+    // Mining operation. Home-system extraction only funds/feeds gate construction, so
+    // once the gate is built (in_home_phase == false) the slots go never_purchase: no
+    // new buys, but any leftover ships stay assigned and self-scrap (see scripts). The
+    // construction hauler below shares this lifecycle and the same purchase criteria.
+    let home_phase_purchase = PurchaseCriteria {
+        never_purchase: !in_home_phase,
+        ..PurchaseCriteria::default()
+    };
     const NUM_SURVEYORS: i64 = 1;
     const NUM_MINING_DRONES: i64 = 8;
     const NUM_MINING_SHUTTLES: i64 = 2;
@@ -120,7 +132,7 @@ pub fn ship_config_starter_system(
             ShipConfig {
                 id: format!("surveyor/{}", i),
                 ship_model: "SHIP_SURVEYOR".to_string(),
-                purchase_criteria: PurchaseCriteria::default(),
+                purchase_criteria: home_phase_purchase.clone(),
                 behaviour: ShipBehaviour::MiningSurveyor,
             },
         ));
@@ -131,7 +143,7 @@ pub fn ship_config_starter_system(
             ShipConfig {
                 id: format!("mining_drone/{}", i),
                 ship_model: "SHIP_MINING_DRONE".to_string(),
-                purchase_criteria: PurchaseCriteria::default(),
+                purchase_criteria: home_phase_purchase.clone(),
                 behaviour: ShipBehaviour::MiningDrone,
             },
         ));
@@ -142,19 +154,21 @@ pub fn ship_config_starter_system(
             ShipConfig {
                 id: format!("mining_shuttle/{}", i),
                 ship_model: "SHIP_LIGHT_HAULER".to_string(),
-                purchase_criteria: PurchaseCriteria::default(),
+                purchase_criteria: home_phase_purchase.clone(),
                 behaviour: ShipBehaviour::MiningShuttle,
             },
         ));
     }
 
-    // Dedicated jump gate construction hauler
+    // Dedicated jump gate construction hauler. Same lifecycle as the extraction fleet:
+    // bought while building, then never_purchase so it stays assigned and self-scraps
+    // once the gate is built (see construction::run_hauler).
     ships.push((
         (4.0, 0.0),
         ShipConfig {
             id: "jump_gate_hauler".to_string(),
             ship_model: "SHIP_LIGHT_HAULER".to_string(),
-            purchase_criteria: PurchaseCriteria::default(),
+            purchase_criteria: home_phase_purchase.clone(),
             behaviour: ShipBehaviour::ConstructionHauler,
         },
     ));
@@ -203,7 +217,8 @@ pub fn ship_config_starter_system(
             ));
         }
 
-        // Siphon drones + haulers
+        // Siphon drones + haulers. Same lifecycle as mining (never_purchase once past
+        // the gate so leftover ships stay assigned and self-scrap).
         const NUM_SIPHON_DRONES: usize = 8;
         const NUM_SIPHON_SHUTTLES: usize = 1;
         for i in 0..NUM_SIPHON_DRONES {
@@ -212,7 +227,7 @@ pub fn ship_config_starter_system(
                 ShipConfig {
                     id: format!("siphon_drone/{}", i),
                     ship_model: "SHIP_SIPHON_DRONE".to_string(),
-                    purchase_criteria: PurchaseCriteria::default(),
+                    purchase_criteria: home_phase_purchase.clone(),
                     behaviour: ShipBehaviour::SiphonDrone,
                 },
             ));
@@ -223,7 +238,7 @@ pub fn ship_config_starter_system(
                 ShipConfig {
                     id: format!("siphon_shuttle/{}", i),
                     ship_model: "SHIP_LIGHT_HAULER".to_string(),
-                    purchase_criteria: PurchaseCriteria::default(),
+                    purchase_criteria: home_phase_purchase.clone(),
                     behaviour: ShipBehaviour::SiphonShuttle,
                 },
             ));

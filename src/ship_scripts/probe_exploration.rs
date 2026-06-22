@@ -67,12 +67,14 @@ async fn tick(
                 .map(|n| n.to_string())
                 .collect::<Vec<_>>()
                 .join(" -> ");
-            let desc = format!(
+            debug!(
                 "Navigating to {} in {}s via path {}",
                 target_jumpgate, duration, path_str
             );
-            debug!("{}", desc);
-            ship.set_state_description(&desc);
+            ship.set_state_description(&format!(
+                "Navigating to {} in {}s",
+                target_jumpgate, duration
+            ));
 
             // Execute route
             ship.goto_waypoint(&start_jumpgate).await;

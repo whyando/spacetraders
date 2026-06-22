@@ -415,6 +415,17 @@ impl FleetManager {
         let mut ships = vec![];
         let use_nonstatic_probes = true;
         let incl_outer_probes_and_siphons = !matches!(era, AgentEra::StartingSystem1);
+        // The home-system build-out fleet (mining + siphon + the dedicated construction
+        // hauler) exists only to fund and feed gate construction. While building it out
+        // (StartingSystem*) we buy and run it; once past the gate we stop buying. The
+        // slots stay emitted as never_purchase, which keeps any leftover ships assigned
+        // so their scripts run and self-scrap on the same era cue
+        // (ship_scripts::home_phase_done) — covering a restart past the gate, where they'd
+        // otherwise load unassigned and never scrap.
+        let in_home_phase = matches!(
+            era,
+            AgentEra::StartingSystem1 | AgentEra::StartingSystem2
+        );
         if CONFIG.no_gate_mode {
             panic!("No gate mode not supported");
         }
@@ -425,6 +436,7 @@ impl FleetManager {
             &shipyards,
             use_nonstatic_probes,
             incl_outer_probes_and_siphons,
+            in_home_phase,
         ));
 
         if era == AgentEra::InterSystem1 {
@@ -663,31 +675,43 @@ impl FleetManager {
                             .await;
                         })
                     }
-                    ShipBehaviour::SiphonDrone => tokio::spawn(async move {
-                        ship_scripts::siphon::run_drone(ship_controller).await;
-                    }),
+                    ShipBehaviour::SiphonDrone => {
+                        let ac = ac.clone();
+                        tokio::spawn(async move {
+                            ship_scripts::siphon::run_drone(ship_controller, ac).await;
+                        })
+                    }
                     ShipBehaviour::SiphonShuttle => {
                         let db = self.ctx.db.clone();
+                        let ac = ac.clone();
                         tokio::spawn(async move {
-                            ship_scripts::siphon::run_shuttle(ship_controller, db).await;
+                            ship_scripts::siphon::run_shuttle(ship_controller, db, ac).await;
                         })
                     }
-                    ShipBehaviour::MiningDrone => tokio::spawn(async move {
-                        ship_scripts::mining::run_mining_drone(ship_controller).await;
-                    }),
+                    ShipBehaviour::MiningDrone => {
+                        let ac = ac.clone();
+                        tokio::spawn(async move {
+                            ship_scripts::mining::run_mining_drone(ship_controller, ac).await;
+                        })
+                    }
                     ShipBehaviour::MiningShuttle => {
                         let db = self.ctx.db.clone();
+                        let ac = ac.clone();
                         tokio::spawn(async move {
-                            ship_scripts::mining::run_shuttle(ship_controller, db).await;
+                            ship_scripts::mining::run_shuttle(ship_controller, db, ac).await;
                         })
                     }
-                    ShipBehaviour::MiningSurveyor => tokio::spawn(async move {
-                        ship_scripts::mining::run_surveyor(ship_controller).await;
-                    }),
+                    ShipBehaviour::MiningSurveyor => {
+                        let ac = ac.clone();
+                        tokio::spawn(async move {
+                            ship_scripts::mining::run_surveyor(ship_controller, ac).await;
+                        })
+                    }
                     ShipBehaviour::ConstructionHauler => {
                         let db = self.ctx.db.clone();
+                        let ac = ac.clone();
                         tokio::spawn(async move {
-                            ship_scripts::construction::run_hauler(ship_controller, db).await;
+                            ship_scripts::construction::run_hauler(ship_controller, db, ac).await;
                         })
                     }
                     ShipBehaviour::JumpgateProbe => {

@@ -35,6 +35,7 @@ pub async fn run(ship: ShipController) {
         }
     };
 
+    ship.set_state_description(&format!("Scrapping ship at {}", shipyard.symbol));
     ship.goto_waypoint(&shipyard.symbol).await;
     ship.scrap().await;
 }
