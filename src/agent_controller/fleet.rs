@@ -316,7 +316,14 @@ impl FleetManager {
         let mut purchased_ships = vec![];
 
         let ship_config = self.get_ship_config();
-        for job in ship_config.iter().filter(|job| !self.job_assigned(&job.id)) {
+        // Skip never_purchase jobs here: they're intentionally never bought, and an
+        // *unassigned* one (e.g. a retire slot left behind after a ship is scrapped) would
+        // otherwise hit the FailedNeverPurchase early-return below and starve every job
+        // after it in the list (jumpgate/intel/explorer purchases).
+        for job in ship_config
+            .iter()
+            .filter(|job| !self.job_assigned(&job.id) && !job.purchase_criteria.never_purchase)
+        {
             let result = self.try_buy_ship(&purchaser, job).await;
             match result {
                 BuyShipResult::Bought(ship_symbol) => {
