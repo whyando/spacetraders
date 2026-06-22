@@ -175,6 +175,12 @@ pub struct JettisonResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaypointScanResponse {
+    pub cooldown: models::ShipCooldown,
+    pub waypoints: Vec<WaypointDetailed>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferResponse {
     pub cargo: models::ShipCargo,

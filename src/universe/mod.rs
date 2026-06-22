@@ -540,6 +540,55 @@ impl Universe {
         }
     }
 
+    // Ingest freshly-observed waypoint details (e.g. from a sensor-array scan), updating
+    // the in-memory cache and DB. Unlike get_system_waypoints' first-load (do_nothing),
+    // this OVERWRITES, so a scan that reveals a previously-uncharted market/shipyard is
+    // actually learned (is_market/is_shipyard flip from their stale uncharted values).
+    pub async fn ingest_scanned_waypoints(&self, waypoints: &[WaypointDetailed]) {
+        let Some(first) = waypoints.first() else {
+            return;
+        };
+        let system_symbol = first.system_symbol.clone();
+        let system = self.system(&system_symbol);
+        for w in waypoints {
+            let Some(db_waypoint) = system.waypoints.iter().find(|x| x.symbol == w.symbol) else {
+                continue;
+            };
+            let details = NewWaypointDetails {
+                waypoint_id: db_waypoint.id,
+                is_market: w.is_market(),
+                is_shipyard: w.is_shipyard(),
+                is_uncharted: w.is_uncharted(),
+                is_under_construction: w.is_under_construction,
+            };
+            diesel::insert_into(waypoint_details::table)
+                .values(&details)
+                .on_conflict(waypoint_details::waypoint_id)
+                .do_update()
+                .set((
+                    waypoint_details::is_market.eq(details.is_market),
+                    waypoint_details::is_shipyard.eq(details.is_shipyard),
+                    waypoint_details::is_uncharted.eq(details.is_uncharted),
+                    waypoint_details::is_under_construction.eq(details.is_under_construction),
+                ))
+                .execute(&mut self.db.conn().await)
+                .await
+                .expect("DB Insert error");
+        }
+        // Refresh the in-memory cache so is_market()/is_shipyard() reflect the scan.
+        let mut s = self.systems.get_mut(&system_symbol).unwrap();
+        for wp in s.value_mut().waypoints.iter_mut() {
+            if let Some(scanned) = waypoints.iter().find(|x| x.symbol == wp.symbol) {
+                wp.details = Some(WaypointDetails {
+                    is_market: scanned.is_market(),
+                    is_shipyard: scanned.is_shipyard(),
+                    is_uncharted: scanned.is_uncharted(),
+                    is_under_construction: scanned.is_under_construction,
+                });
+            }
+        }
+    }
+
     pub async fn get_system_markets(
         &self,
         symbol: &SystemSymbol,

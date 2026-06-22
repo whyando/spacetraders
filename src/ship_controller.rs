@@ -1,7 +1,7 @@
 use crate::agent_controller::AgentContext;
 use crate::api_client::api_models::{
     ExtractResponse, JettisonResponse, NavigateResponse, OrbitResponse, RefuelResponse,
-    SiphonResponse, SurveyResponse, TradeResponse,
+    SiphonResponse, SurveyResponse, TradeResponse, WaypointDetailed, WaypointScanResponse,
 };
 use crate::models::{ShipCargoItem, ShipCooldown};
 use crate::ship_controller::ShipNavStatus::*;
@@ -687,6 +687,25 @@ impl ShipController {
         }
         self.update_cooldown(cooldown);
         self.ctx.survey_manager.insert_surveys(surveys).await;
+    }
+
+    // Sensor-array waypoint scan: reveals nearby waypoints' traits (markets/shipyards),
+    // bypassing their uncharted state. Requires a MOUNT_SENSOR_ARRAY; triggers a cooldown.
+    // Ingests the revealed traits into the universe so the agent learns the markets.
+    pub async fn scan_waypoints(&self) -> Vec<WaypointDetailed> {
+        assert!(!self.is_in_transit());
+        self.wait_for_cooldown().await;
+        self.debug(&format!("Scanning waypoints from {}", self.waypoint()));
+        let uri = format!("/my/ships/{}/scan/waypoints", self.ship_symbol);
+        let WaypointScanResponse { cooldown, waypoints } = self
+            .ctx
+            .api_client
+            .post::<Data<WaypointScanResponse>, _>(&uri, &json!({}))
+            .await
+            .data;
+        self.update_cooldown(cooldown);
+        self.ctx.universe.ingest_scanned_waypoints(&waypoints).await;
+        waypoints
     }
 
     pub async fn transfer_cargo(&self) {

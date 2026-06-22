@@ -19,6 +19,10 @@ pub struct Config {
     // stationed at every market and shipyard waypoint. Parsed from INTEL_SYSTEMS
     // (comma-separated system symbols, e.g. "X1-NX57,X1-AB12").
     pub intel_systems: Vec<SystemSymbol>,
+    // One-time remote-system survey: the command frigate (fast + sensor array) routes
+    // to this system, scans to reveal every waypoint's traits, snapshots the markets/
+    // shipyards, then resumes trading. Parsed from SURVEY_SYSTEM (a single symbol).
+    pub survey_system: Option<SystemSymbol>,
 }
 
 lazy_static! {
@@ -67,6 +71,12 @@ lazy_static! {
             .filter(|s| !s.is_empty())
             .map(|s| SystemSymbol::parse(s).expect("Invalid system symbol in INTEL_SYSTEMS"))
             .collect();
+        let survey_system = match std::env::var("SURVEY_SYSTEM") {
+            Ok(val) if !val.trim().is_empty() => {
+                Some(SystemSymbol::parse(val.trim()).expect("Invalid SURVEY_SYSTEM"))
+            }
+            _ => None,
+        };
         Config {
             api_base_url,
             job_id_filter,
@@ -78,6 +88,7 @@ lazy_static! {
             disable_trading_tasks,
             disable_contract_tasks,
             intel_systems,
+            survey_system,
         }
     };
 }

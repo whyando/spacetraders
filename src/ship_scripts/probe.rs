@@ -18,7 +18,7 @@ lazy_static! {
 // single jump). If the destination isn't reachable yet — its gate, or a gate on the
 // path, hasn't been charted — wait and retry rather than panicking, since the frontier
 // is still being charted by the jumpgate probes.
-async fn goto_waypoint_anywhere(ship: &ShipController, target: &WaypointSymbol) {
+pub async fn goto_waypoint_anywhere(ship: &ShipController, target: &WaypointSymbol) {
     let target_system = target.system();
     loop {
         if ship.system() == target_system {
