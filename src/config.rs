@@ -15,10 +15,6 @@ pub struct Config {
     pub disable_trading_tasks: bool,
     pub disable_contract_tasks: bool,
     pub era_override: Option<AgentEra>,
-    // Systems to keep fully probed for market/shipyard intel: a static probe is
-    // stationed at every market and shipyard waypoint. Parsed from INTEL_SYSTEMS
-    // (comma-separated system symbols, e.g. "X1-NX57,X1-AB12").
-    pub intel_systems: Vec<SystemSymbol>,
     // One-time remote-system survey: an explorer (fast + sensor array) routes to this
     // system and scans once to reveal every waypoint's traits. Parsed from SURVEY_SYSTEM.
     pub survey_system: Option<SystemSymbol>,
@@ -63,13 +59,6 @@ lazy_static! {
             Ok(val) => Some(val.parse().expect("Invalid ERA_OVERRIDE")),
             Err(_) => None,
         };
-        let intel_systems = std::env::var("INTEL_SYSTEMS")
-            .unwrap_or_default()
-            .split(',')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(|s| SystemSymbol::parse(s).expect("Invalid system symbol in INTEL_SYSTEMS"))
-            .collect();
         let survey_system = match std::env::var("SURVEY_SYSTEM") {
             Ok(val) if !val.trim().is_empty() => {
                 Some(SystemSymbol::parse(val.trim()).expect("Invalid SURVEY_SYSTEM"))
@@ -86,7 +75,6 @@ lazy_static! {
             no_gate_mode,
             disable_trading_tasks,
             disable_contract_tasks,
-            intel_systems,
             survey_system,
         }
     };

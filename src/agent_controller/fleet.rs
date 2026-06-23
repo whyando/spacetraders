@@ -437,19 +437,60 @@ impl FleetManager {
             panic!("No gate mode not supported");
         }
 
-        ships.append(&mut ship_config_starter_system(
-            &waypoints,
-            &markets,
-            &shipyards,
-            use_nonstatic_probes,
-            incl_outer_probes_and_siphons,
-            in_home_phase,
-        ));
+        // Once the faction capital is reachable over the jumpgate network we pivot to
+        // trading t5 systems out of the capital, and the whole starting-area fleet (home
+        // economy, static probes, logistics haulers, command ship) becomes obsolete. We
+        // then stop emitting those slots so the ships fall unassigned and self-sell
+        // (SCRAP_UNASSIGNED). Gated additionally on the t5 purchaser probe already
+        // existing: the home fleet is what bootstraps that probe, so it must stick around
+        // until the capital pipeline is self-sufficient — otherwise nothing could buy it.
+        // The network-charting probes (bought earlier) and t5 traders are kept.
+        let capital = match era {
+            AgentEra::InterSystem1 => Some(self.ctx.faction_capital()),
+            _ => None,
+        };
+        let home_gate = self
+            .ctx
+            .universe
+            .get_jumpgate_opt(&self.ctx.starting_system())
+            .await;
+        let capital_reachable = match (&home_gate, &capital) {
+            (Some(home_gate), Some(capital)) => match self
+                .ctx
+                .universe
+                .get_jumpgate_opt(capital)
+                .await
+            {
+                Some(capital_gate) => {
+                    self.ctx
+                        .universe
+                        .is_jumpgate_reachable(home_gate, &capital_gate)
+                        .await
+                }
+                None => false,
+            },
+            _ => false,
+        };
+        let t5_purchaser_running = self
+            .job_assignments
+            .iter()
+            .any(|kv| kv.key().starts_with("t5_trader_purchaser"));
+        let retire_home_fleet = capital_reachable && t5_purchaser_running;
+
+        if !retire_home_fleet {
+            ships.append(&mut ship_config_starter_system(
+                &waypoints,
+                &markets,
+                &shipyards,
+                use_nonstatic_probes,
+                incl_outer_probes_and_siphons,
+                in_home_phase,
+            ));
+        }
 
         if era == AgentEra::InterSystem1 {
             // Charting phase: fan probes out across the jump-gate network to map
-            // the web of connections as quickly as possible. The home economy
-            // (starter-system config above) keeps running to fund them.
+            // the web of connections as quickly as possible.
             const NUM_JUMPGATE_PROBES: i64 = 20;
             for i in 0..NUM_JUMPGATE_PROBES {
                 ships.push(ShipConfig {
@@ -466,39 +507,6 @@ impl FleetManager {
                 });
             }
 
-            // Remote-system market/shipyard intelligence: station a static probe at every
-            // market and shipyard in each configured intel system. Probes self-route across
-            // the jump-gate network (probe::goto_waypoint_anywhere) and refresh on arrival,
-            // giving live prices + ship listings there. Only deploy once the target's gate is
-            // charted — otherwise there's no route and the probes would just wait.
-            for system in &CONFIG.intel_systems {
-                let Some(gate) = self.ctx.universe.get_jumpgate_opt(system).await else {
-                    continue;
-                };
-                if !self.ctx.universe.connections_known(&gate) {
-                    continue;
-                }
-                let waypoints = self.ctx.universe.get_system_waypoints(system).await;
-                for w in waypoints
-                    .iter()
-                    .filter(|w| w.is_market() || w.is_shipyard())
-                {
-                    ships.push(ShipConfig {
-                        id: format!("intel_probe/{}", w.symbol),
-                        ship_model: "SHIP_PROBE".to_string(),
-                        purchase_criteria: PurchaseCriteria {
-                            allow_logistic_task: true,
-                            require_cheapest: false,
-                            ..PurchaseCriteria::default()
-                        },
-                        behaviour: ShipBehaviour::Probe(ProbeScriptConfig {
-                            waypoints: vec![w.symbol.clone()],
-                            refresh_market: true,
-                        }),
-                    });
-                }
-            }
-
             // Dispatch a refining freighter to trade each high-value (P(T5) >= 0.5)
             // system as it joins the jumpgate network. The freighter is sold somewhere
             // in the faction capital; find the shipyard from its remote view (ship_types
@@ -509,40 +517,25 @@ impl FleetManager {
             // actually reachable, then stop at 25.
             //
             // All of this is gated on the capital being reachable from our home gate over
-            // the known jumpgate network: until then the purchaser probe couldn't route
-            // there (it jumps, never warps) and nothing could be bought, so emitting the
-            // jobs early would just strand an idle probe. The block re-appears the moment
-            // the network grows to include the capital.
+            // the known jumpgate network (computed above): until then the purchaser probe
+            // couldn't route there (it jumps, never warps) and nothing could be bought, so
+            // emitting the jobs early would just strand an idle probe. The block re-appears
+            // the moment the network grows to include the capital.
             const T5_TRADER_MODEL: &str = "SHIP_REFINING_FREIGHTER";
             const MAX_T5_TRADERS: usize = 25;
-            let capital = self.ctx.faction_capital();
-            let home_gate = self
-                .ctx
-                .universe
-                .get_jumpgate_opt(&self.ctx.starting_system())
-                .await;
-            let capital_gate = self.ctx.universe.get_jumpgate_opt(&capital).await;
-            let capital_reachable = match (&home_gate, &capital_gate) {
-                (Some(home_gate), Some(capital_gate)) => {
-                    self.ctx
-                        .universe
-                        .is_jumpgate_reachable(home_gate, capital_gate)
-                        .await
-                }
-                _ => false,
-            };
-            let trader_shipyard = match capital_reachable {
-                true => self
+            let trader_shipyard = match (capital_reachable, &capital) {
+                (true, Some(capital)) => self
                     .ctx
                     .universe
-                    .get_system_shipyards_remote(&capital)
+                    .get_system_shipyards_remote(capital)
                     .await
                     .into_iter()
                     .find(|sy| sy.ship_types.iter().any(|t| t.ship_type == T5_TRADER_MODEL))
                     .map(|sy| sy.symbol),
-                false => None,
+                _ => None,
             };
             if let Some(shipyard) = trader_shipyard {
+                let capital = capital.clone().expect("capital set when reachable");
                 ships.push(ShipConfig {
                     id: format!("t5_trader_purchaser/{}", shipyard),
                     ship_model: "SHIP_PROBE".to_string(),
