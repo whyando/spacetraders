@@ -3,6 +3,7 @@ use crate::api_client::api_models::WaypointDetailed;
 use crate::models::{ShipFlightMode, System, SystemSymbol, WaypointSymbol};
 use crate::util;
 use log::*;
+use pathfinding::directed::dijkstra::dijkstra_all;
 use quadtree_rs::area::AreaBuilder;
 use quadtree_rs::{Quadtree, point::Point};
 use std::cmp::max;
@@ -143,6 +144,67 @@ impl Universe {
         }
 
         graph
+    }
+
+    // Is `target_gate` reachable from `from_gate` over the constructed + charted
+    // jumpgate network (the same network ships actually jump across)?
+    pub async fn is_jumpgate_reachable(
+        &self,
+        from_gate: &WaypointSymbol,
+        target_gate: &WaypointSymbol,
+    ) -> bool {
+        if from_gate == target_gate {
+            return true;
+        }
+        let graph = self.jumpgate_graph().await;
+        let reachables = dijkstra_all(from_gate, |node| {
+            graph
+                .get(node)
+                .map(|g| g.active_connections.clone())
+                .unwrap_or_default()
+        });
+        reachables.contains_key(target_gate)
+    }
+
+    // Systems with P(T5) >= 0.5 whose jump gate is reachable from `from_gate`
+    // over the constructed + charted jumpgate network, ordered nearest-first by
+    // hop cost. A high-T5 system with no gate, or one not yet wired into the
+    // network, is omitted — it surfaces here the moment its gate becomes
+    // reachable, which is what gates explorer purchasing.
+    pub async fn reachable_high_t5_systems(&self, from_gate: &WaypointSymbol) -> Vec<SystemSymbol> {
+        const T5_THRESHOLD: f64 = 0.5;
+        let graph = self.jumpgate_graph().await;
+        let reachables = dijkstra_all(from_gate, |node| {
+            graph
+                .get(node)
+                .map(|g| g.active_connections.clone())
+                .unwrap_or_default()
+        });
+
+        let mut candidates: Vec<(SystemSymbol, i64)> = vec![];
+        for system in self.systems() {
+            if system.p_t5().map(|p| p >= T5_THRESHOLD) != Some(true) {
+                continue;
+            }
+            let Some(gate) = system
+                .waypoints
+                .iter()
+                .find(|w| w.waypoint_type == "JUMP_GATE")
+                .map(|w| w.symbol.clone())
+            else {
+                continue;
+            };
+            let dist = if &gate == from_gate {
+                Some(0)
+            } else {
+                reachables.get(&gate).map(|(_pre, d)| *d)
+            };
+            if let Some(dist) = dist {
+                candidates.push((system.symbol.clone(), dist));
+            }
+        }
+        candidates.sort_by_key(|(_system, d)| *d);
+        candidates.into_iter().map(|(system, _d)| system).collect()
     }
 
     pub async fn warp_jump_graph(

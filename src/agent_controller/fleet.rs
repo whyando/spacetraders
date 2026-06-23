@@ -499,14 +499,52 @@ impl FleetManager {
                 }
             }
 
-            // Bootstrap a SHIP_EXPLORER (fast + sensor array + warp) from a faction-capital
-            // shipyard, then have it survey-scan remote systems. A purchaser probe parks at
-            // the shipyard, refreshing it so the agent learns it sells explorers and can
-            // transact there (note_waypoint_traits); the explorer is bought once and runs
-            // the Survey behaviour against SURVEY_SYSTEM.
-            if let Some(shipyard) = &CONFIG.explorer_shipyard {
+            // Dispatch a refining freighter to trade each high-value (P(T5) >= 0.5)
+            // system as it joins the jumpgate network. The freighter is sold somewhere
+            // in the faction capital; find the shipyard from its remote view (ship_types
+            // are known without a ship present) and park a purchaser probe there,
+            // refreshing it so the agent learns the price and can transact there. One
+            // t5-trader slot is emitted per currently-reachable high-T5 system
+            // (nearest-first), capped at 25 — so we only buy a ship once its target is
+            // actually reachable, then stop at 25.
+            //
+            // All of this is gated on the capital being reachable from our home gate over
+            // the known jumpgate network: until then the purchaser probe couldn't route
+            // there (it jumps, never warps) and nothing could be bought, so emitting the
+            // jobs early would just strand an idle probe. The block re-appears the moment
+            // the network grows to include the capital.
+            const T5_TRADER_MODEL: &str = "SHIP_REFINING_FREIGHTER";
+            const MAX_T5_TRADERS: usize = 25;
+            let capital = self.ctx.faction_capital();
+            let home_gate = self
+                .ctx
+                .universe
+                .get_jumpgate_opt(&self.ctx.starting_system())
+                .await;
+            let capital_gate = self.ctx.universe.get_jumpgate_opt(&capital).await;
+            let capital_reachable = match (&home_gate, &capital_gate) {
+                (Some(home_gate), Some(capital_gate)) => {
+                    self.ctx
+                        .universe
+                        .is_jumpgate_reachable(home_gate, capital_gate)
+                        .await
+                }
+                _ => false,
+            };
+            let trader_shipyard = match capital_reachable {
+                true => self
+                    .ctx
+                    .universe
+                    .get_system_shipyards_remote(&capital)
+                    .await
+                    .into_iter()
+                    .find(|sy| sy.ship_types.iter().any(|t| t.ship_type == T5_TRADER_MODEL))
+                    .map(|sy| sy.symbol),
+                false => None,
+            };
+            if let Some(shipyard) = trader_shipyard {
                 ships.push(ShipConfig {
-                    id: format!("explorer_purchaser/{}", shipyard),
+                    id: format!("t5_trader_purchaser/{}", shipyard),
                     ship_model: "SHIP_PROBE".to_string(),
                     purchase_criteria: PurchaseCriteria {
                         allow_logistic_task: true,
@@ -518,16 +556,27 @@ impl FleetManager {
                         refresh_market: true,
                     }),
                 });
-                ships.push(ShipConfig {
-                    id: "survey_explorer".to_string(),
-                    ship_model: "SHIP_EXPLORER".to_string(),
-                    purchase_criteria: PurchaseCriteria {
-                        system_symbol: Some(shipyard.system()),
-                        require_cheapest: false,
-                        ..PurchaseCriteria::default()
-                    },
-                    behaviour: ShipBehaviour::Survey,
-                });
+                // capital_reachable above guarantees the home gate exists.
+                let home_gate = home_gate.expect("home gate present when capital reachable");
+                let num_traders = self
+                    .ctx
+                    .universe
+                    .reachable_high_t5_systems(&home_gate)
+                    .await
+                    .len()
+                    .min(MAX_T5_TRADERS);
+                for i in 0..num_traders {
+                    ships.push(ShipConfig {
+                        id: format!("t5_trader/{}", i),
+                        ship_model: T5_TRADER_MODEL.to_string(),
+                        purchase_criteria: PurchaseCriteria {
+                            system_symbol: Some(capital.clone()),
+                            require_cheapest: false,
+                            ..PurchaseCriteria::default()
+                        },
+                        behaviour: ShipBehaviour::T5Trader,
+                    });
+                }
             }
         }
         ships
@@ -806,6 +855,13 @@ impl FleetManager {
                         let ac = ac.clone();
                         tokio::spawn(async move {
                             ship_scripts::survey::run_scanner(ship_controller, ac).await;
+                        })
+                    }
+                    ShipBehaviour::T5Trader => {
+                        let db = self.ctx.db.clone();
+                        let ac = ac.clone();
+                        tokio::spawn(async move {
+                            ship_scripts::t5_trader::run_t5_trader(ship_controller, db, ac).await;
                         })
                     }
                 };

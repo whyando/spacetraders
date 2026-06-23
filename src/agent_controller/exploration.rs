@@ -9,8 +9,10 @@ pub struct ExplorationManager {
     ctx: Arc<AgentContext>,
     probe_jumpgate_reservations: Arc<DashMap<String, WaypointSymbol>>,
     explorer_reservations: Arc<DashMap<String, SystemSymbol>>,
+    t5_system_reservations: Arc<DashMap<String, SystemSymbol>>,
     probe_reserve_mutex_guard: Arc<tokio::sync::Mutex<()>>,
     explorer_reserve_mutex_guard: Arc<tokio::sync::Mutex<()>>,
+    t5_reserve_mutex_guard: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl ExplorationManager {
@@ -18,13 +20,16 @@ impl ExplorationManager {
         ctx: Arc<AgentContext>,
         probe_jumpgate_reservations: DashMap<String, WaypointSymbol>,
         explorer_reservations: DashMap<String, SystemSymbol>,
+        t5_system_reservations: DashMap<String, SystemSymbol>,
     ) -> Self {
         Self {
             ctx,
             probe_jumpgate_reservations: Arc::new(probe_jumpgate_reservations),
             explorer_reservations: Arc::new(explorer_reservations),
+            t5_system_reservations: Arc::new(t5_system_reservations),
             probe_reserve_mutex_guard: Arc::new(tokio::sync::Mutex::new(())),
             explorer_reserve_mutex_guard: Arc::new(tokio::sync::Mutex::new(())),
+            t5_reserve_mutex_guard: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -152,6 +157,47 @@ impl ExplorationManager {
                     .save_explorer_reservations(&self.ctx.callsign, &self.explorer_reservations)
                     .await;
                 Some(target.clone())
+            }
+            None => None,
+        }
+    }
+
+    // Reserve the nearest (by jumpgate hops from our home gate) unreserved system
+    // with P(T5) >= 0.5, so each t5 trader works a distinct high-value system.
+    pub async fn get_t5_system_reservation(&self, ship_symbol: &str) -> Option<SystemSymbol> {
+        let existing = self.t5_system_reservations.get(ship_symbol);
+        if let Some(existing) = existing {
+            return Some(existing.value().clone());
+        }
+
+        let _lock = self.t5_reserve_mutex_guard.lock().await;
+        let home_gate = self
+            .ctx
+            .universe
+            .get_jumpgate_opt(&self.ctx.starting_system())
+            .await?;
+        let candidates = self
+            .ctx
+            .universe
+            .reachable_high_t5_systems(&home_gate)
+            .await;
+
+        let target = candidates.into_iter().find(|system| {
+            !self
+                .t5_system_reservations
+                .iter()
+                .any(|x| x.value() == system)
+        });
+
+        match target {
+            Some(target) => {
+                self.t5_system_reservations
+                    .insert(ship_symbol.to_string(), target.clone());
+                self.ctx
+                    .db
+                    .save_t5_system_reservations(&self.ctx.callsign, &self.t5_system_reservations)
+                    .await;
+                Some(target)
             }
             None => None,
         }

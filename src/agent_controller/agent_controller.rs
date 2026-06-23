@@ -137,6 +137,7 @@ impl AgentController {
             .collect();
         let probe_jumpgate_reservations = db.get_probe_jumpgate_reservations(callsign).await;
         let explorer_reservations = db.get_explorer_reservations(callsign).await;
+        let t5_system_reservations = db.get_t5_system_reservations(callsign).await;
         let task_manager = LogisticTaskManager::new(universe, db, &system_symbol).await;
         let survey_manager = SurveyManager::new(db).await;
 
@@ -192,6 +193,7 @@ impl AgentController {
             ctx.clone(),
             probe_jumpgate_reservations,
             explorer_reservations,
+            t5_system_reservations,
         );
 
         let agent_controller = Self {
@@ -388,6 +390,11 @@ impl AgentController {
     ) -> Option<SystemSymbol> {
         self.exploration
             .get_explorer_reservation(ship_symbol, ship_loc)
+            .await
+    }
+    pub async fn get_t5_system_reservation(&self, ship_symbol: &str) -> Option<SystemSymbol> {
+        self.exploration
+            .get_t5_system_reservation(ship_symbol)
             .await
     }
 }

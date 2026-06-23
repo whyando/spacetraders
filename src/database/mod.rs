@@ -926,6 +926,23 @@ impl DbClient {
         self.set_value(&key, &reservations).await
     }
 
+    pub async fn get_t5_system_reservations(
+        &self,
+        callsign: &str,
+    ) -> DashMap<String, SystemSymbol> {
+        let key = format!("t5_system_reservations/{}", callsign);
+        self.get_value(&key).await.unwrap_or_default()
+    }
+
+    pub async fn save_t5_system_reservations(
+        &self,
+        callsign: &str,
+        reservations: &DashMap<String, SystemSymbol>,
+    ) {
+        let key = format!("t5_system_reservations/{}", callsign);
+        self.set_value(&key, &reservations).await
+    }
+
     pub async fn get_factions(&self) -> Option<Vec<crate::models::Faction>> {
         self.get_value("factions").await
     }
