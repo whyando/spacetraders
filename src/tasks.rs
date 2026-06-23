@@ -697,6 +697,27 @@ impl LogisticTaskManager {
             .into_iter()
             .filter(|w| w.is_market())
             .collect::<Vec<_>>();
+
+        // The planner indexes every task waypoint into market_waypoints and unwraps the
+        // result, so any task referencing a non-market (or cross-system, e.g. a contract
+        // delivered back home) waypoint would panic. Drop those — the ship trades what it
+        // can actually reach as a market here.
+        let market_set: std::collections::HashSet<WaypointSymbol> =
+            market_waypoints.iter().map(|w| w.symbol.clone()).collect();
+        let available_tasks = available_tasks
+            .into_iter()
+            .filter(|task| {
+                let wps: Vec<&WaypointSymbol> = match &task.actions {
+                    TaskActions::VisitLocation { waypoint, .. } => vec![waypoint],
+                    TaskActions::TransportCargo { src, dest, .. } => vec![src, dest],
+                };
+                wps.iter().all(|wp| market_set.contains(*wp))
+            })
+            .collect::<Vec<_>>();
+        if available_tasks.is_empty() {
+            return None;
+        }
+
         let (duration_matrix, distance_matrix) =
             crate::universe::pathfinding::full_travel_matrix(
                 &market_waypoints,
