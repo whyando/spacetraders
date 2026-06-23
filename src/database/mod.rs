@@ -69,7 +69,10 @@ impl DbClient {
         let db = {
             let database_url = format!("{}?options=-c%20search_path%3D{}", database_url, slice_id);
             let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
-            Pool::builder(manager).max_size(5).build().unwrap()
+            // The fleet has outgrown a 5-connection pool (30+ ships + intel probes + a
+            // remote-system trader): concurrent DB ops exceeded it and conn() timed out,
+            // panicking the whole agent. Give it comfortable headroom.
+            Pool::builder(manager).max_size(32).build().unwrap()
         };
         // Check the connection
         {
