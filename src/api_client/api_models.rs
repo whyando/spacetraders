@@ -52,8 +52,12 @@ pub struct WaypointDetailed {
     pub orbits: Option<String>,
     pub faction: Option<Symbol>,
     pub traits: Vec<SymbolNameDescr>,
+    // ScannedWaypoint (sensor-array scan response) omits modifiers and isUnderConstruction
+    // that the full Waypoint model has — default them so the same struct parses both.
+    #[serde(default)]
     pub modifiers: Vec<SymbolNameDescr>,
     pub chart: Option<WaypointChart>,
+    #[serde(default)]
     pub is_under_construction: bool,
 }
 
