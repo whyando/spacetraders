@@ -802,9 +802,12 @@ impl FleetManager {
                             ship_scripts::exploration::run_explorer(ship_controller, db, ac).await;
                         })
                     }
-                    ShipBehaviour::Survey => tokio::spawn(async move {
-                        ship_scripts::survey::run_scanner(ship_controller).await;
-                    }),
+                    ShipBehaviour::Survey => {
+                        let ac = ac.clone();
+                        tokio::spawn(async move {
+                            ship_scripts::survey::run_scanner(ship_controller, ac).await;
+                        })
+                    }
                 };
                 let name = format!("{}:{}", ship_symbol, job_spec.id);
                 self.hdls.push(&name, join_hdl);
