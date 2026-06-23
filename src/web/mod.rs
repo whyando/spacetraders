@@ -106,15 +106,27 @@ struct ShipView {
     fuel_capacity: i64,
     cargo_units: i64,
     cargo_capacity: i64,
+    // net signed cash this ship has moved (trade margin - fuel - jumps - purchase
+    // + scrap); excludes agent-level income like contracts. See net_cash_by_ship.
+    net_cash: i64,
 }
 
 async fn api_ships(State(s): State<AppState>) -> Json<Vec<ShipView>> {
+    let net_cash: std::collections::HashMap<String, i64> = s
+        .controller
+        .ctx
+        .db
+        .net_cash_by_ship()
+        .await
+        .into_iter()
+        .collect();
     let mut ships: Vec<ShipView> = s
         .controller
         .ships()
         .into_iter()
         .map(|(symbol, ship, role, descr)| {
             let ship_type = ship.model().unwrap_or_else(|_| ship.frame.symbol.clone());
+            let ship_net_cash = net_cash.get(&symbol).copied().unwrap_or(0);
             ShipView {
                 symbol,
                 role,
@@ -130,6 +142,7 @@ async fn api_ships(State(s): State<AppState>) -> Json<Vec<ShipView>> {
                 fuel_capacity: ship.fuel.capacity,
                 cargo_units: ship.cargo.units,
                 cargo_capacity: ship.cargo.capacity,
+                net_cash: ship_net_cash,
             }
         })
         .collect();

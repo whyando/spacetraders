@@ -528,6 +528,29 @@ impl DbClient {
     // is recorded here. Keeping all spend/income paths funneled through this one
     // method is what lets the reconciliation check (record_metrics) assert the
     // journal is complete.
+    // Net cash impact per ship: signed sum of every ship-attributed journal entry
+    // (trade margin - fuel - jump antimatter - purchase + scrap). Excludes agent-level
+    // entries such as contract payouts, which carry no ship_symbol.
+    pub async fn net_cash_by_ship(&self) -> Vec<(String, i64)> {
+        #[derive(QueryableByName)]
+        struct Row {
+            #[diesel(sql_type = Text)]
+            ship_symbol: String,
+            #[diesel(sql_type = BigInt)]
+            net_cash: i64,
+        }
+        let rows: Vec<Row> = diesel::sql_query(
+            "SELECT ship_symbol, SUM(amount)::bigint AS net_cash \
+             FROM agent_transaction_log \
+             WHERE ship_symbol IS NOT NULL \
+             GROUP BY ship_symbol",
+        )
+        .get_results(&mut self.conn().await)
+        .await
+        .expect("DB Query error");
+        rows.into_iter().map(|r| (r.ship_symbol, r.net_cash)).collect()
+    }
+
     pub async fn record_cash_txn(&self, t: CashTxn<'_>) {
         diesel::insert_into(agent_transaction_log::table)
             .values((
