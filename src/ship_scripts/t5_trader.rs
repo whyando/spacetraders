@@ -1,11 +1,17 @@
+use std::sync::Arc;
+
+use chrono::Duration;
+
 use crate::{
     agent_controller::AgentController,
     database::DbClient,
     models::{LogisticsScriptConfig, PlanLength, PlannerConfig},
     ship_controller::ShipController,
+    tasks::LogisticTaskManager,
 };
-use chrono::Duration;
 use log::*;
+
+use super::probe::goto_waypoint_anywhere;
 
 // Trade a single high-value (P(T5) >= 0.5) system. The trader reserves the nearest
 // such system reachable over the jumpgate network, jumps there (no warping), and
@@ -14,26 +20,51 @@ pub async fn run_t5_trader(ship: ShipController, _db: DbClient, ac: AgentControl
     info!("Starting script t5_trader for {}", ship.symbol());
     ship.wait_for_transit().await;
 
-    let Some(target) = ac.get_t5_system_reservation(&ship.symbol()).await else {
+    let Some(system) = ac.get_t5_system_reservation(&ship.symbol()).await else {
         ship.set_state_description("No target");
         return;
     };
 
     // Travel to the reserved system over the jumpgate network only — no warping.
     // The reservation is jumpgate-reachable from our home gate and the trader was
-    // bought in the (jumpgate-reachable) capital, so a pure-jump route always exists;
-    // goto_waypoint_anywhere routes purely over charted gates.
-    if ship.system() != target {
-        ship.set_state_description(&format!("Navigating to {}", target));
-        let target_gate = ship.ctx.universe.get_jumpgate(&target).await;
-        crate::ship_scripts::probe::goto_waypoint_anywhere(&ship, &target_gate).await;
+    // bought in the (jumpgate-reachable) capital, so a pure-jump route always exists.
+    if ship.system() != system {
+        ship.set_state_description(&format!("Navigating to {}", system));
+        let gate = ship.ctx.universe.get_jumpgate(&system).await;
+        goto_waypoint_anywhere(&ship, &gate).await;
     }
-    assert_eq!(ship.system(), target);
 
-    info!("T5 trader trading in target system {}", target);
-    ship.set_state_description(&format!("Trading in {}", target));
+    // The planner indexes a ship's start waypoint into the system's market set (and
+    // panics on a miss). We arrive parked on the jump gate (not a market), so move
+    // onto the nearest market first; from then on trading keeps us market-to-market.
+    let waypoints = ship.ctx.universe.get_system_waypoints(&system).await;
+    let on_market = waypoints
+        .iter()
+        .any(|w| w.symbol == ship.waypoint() && w.is_market());
+    if !on_market {
+        let here = waypoints.iter().find(|w| w.symbol == ship.waypoint());
+        let nearest_market = waypoints
+            .iter()
+            .filter(|w| w.is_market())
+            .min_by_key(|w| match here {
+                Some(h) => (w.x - h.x).pow(2) + (w.y - h.y).pow(2),
+                None => 0,
+            });
+        if let Some(m) = nearest_market {
+            ship.set_state_description(&format!("Repositioning to market {} to trade", m.symbol));
+            goto_waypoint_anywhere(&ship, &m.symbol).await;
+        }
+    }
 
-    let task_manager = ac.task_manager.clone();
+    // Use a task manager scoped to this system — the shared one (ac.task_manager)
+    // only plans for the starting system, so its market set wouldn't contain this
+    // system's waypoints. State is persisted per-system in the DB.
+    let task_manager = LogisticTaskManager::new(&ship.ctx.universe, &ship.ctx.db, &system).await;
+    task_manager.set_agent_controller(&ac);
+    let task_manager = Arc::new(task_manager);
+
+    info!("T5 trader trading in target system {}", system);
+    ship.set_state_description(&format!("Trading in {}", system));
     let config = LogisticsScriptConfig {
         use_planner: true,
         planner_config: Some(PlannerConfig {
@@ -46,5 +77,5 @@ pub async fn run_t5_trader(ship: ShipController, _db: DbClient, ac: AgentControl
         allow_construction: false,
         min_profit: 5000,
     };
-    crate::ship_scripts::logistics::run(ship.clone(), task_manager, config, ac).await;
+    crate::ship_scripts::logistics::run(ship, task_manager, config, ac).await;
 }
