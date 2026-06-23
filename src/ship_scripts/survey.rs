@@ -46,6 +46,28 @@ pub async fn run_scanner(ship: ShipController, ac: AgentController) {
         goto_waypoint_anywhere(&ship, &gate).await;
     }
 
+    // The planner indexes a ship's start waypoint into the system's market set (and panics
+    // on a miss). After scanning we're parked on the jump gate (not a market), so move onto
+    // the nearest market first; from then on trading keeps us market-to-market.
+    let waypoints = ship.ctx.universe.get_system_waypoints(&system).await;
+    let on_market = waypoints
+        .iter()
+        .any(|w| w.symbol == ship.waypoint() && w.is_market());
+    if !on_market {
+        let here = waypoints.iter().find(|w| w.symbol == ship.waypoint());
+        let nearest_market = waypoints
+            .iter()
+            .filter(|w| w.is_market())
+            .min_by_key(|w| match here {
+                Some(h) => (w.x - h.x).pow(2) + (w.y - h.y).pow(2),
+                None => 0,
+            });
+        if let Some(m) = nearest_market {
+            ship.set_state_description(&format!("Repositioning to market {} to trade", m.symbol));
+            goto_waypoint_anywhere(&ship, &m.symbol).await;
+        }
+    }
+
     let task_manager =
         LogisticTaskManager::new(&ship.ctx.universe, &ship.ctx.db, &system).await;
     task_manager.set_agent_controller(&ac);
