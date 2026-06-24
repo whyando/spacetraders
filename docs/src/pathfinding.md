@@ -39,25 +39,11 @@ able to escape:
   CRUISE distance from the destination to its closest market), so the ship can still
   leave after arriving.
 
-### Fixed: a hop-reconstruction panic on low-fuel non-market routing
-
-After Dijkstra finds a path, the route is rebuilt hop-by-hop and each hop's edge is
-recomputed (`edge(a, b, speed, fuel_max).unwrap()`). This used to panic when routing
-**from a low-fuel ship parked on a non-market waypoint to a distant non-market
-waypoint** (e.g. a freighter hopping between far-flung asteroids).
-
-Root cause: the "market → non-market dest" edge wasn't guarded to market sources. It
-budgets a *full* tank (`fuel_capacity`, since you refuel at the market), but the
-condition also fired for the non-market **source**, whose real budget is the current
-`start_fuel`. So Dijkstra would route src → dest directly on a full-tank edge, then
-reconstruction recomputed that hop with the real `start_fuel`, got `None`, and
-unwrapped it — crashing the whole agent (it runs inside a ship-script task). The
-legitimate non-market-src → dest case is handled by a separate edge with the correct
-`start_fuel` budget.
-
-Fixed by guarding that edge with `x.is_market()`; a low-fuel ship now correctly
-refuels at a market before heading to a distant non-market. Covered by the
-`route_low_fuel_nonmarket_to_distant_nonmarket` regression test in `pathfinding.rs`.
+The edge that budgets a full tank (market → non-market dest) is deliberately
+restricted to **market** sources, since only there can the ship top up; a non-market
+source's hop to a distant dest is budgeted with the real `start_fuel`. Practically, a
+low-fuel ship sitting on a non-market refuels at a market before heading somewhere
+far.
 
 ## Inter-system travel (`src/universe/pathfinding.rs`)
 

@@ -162,9 +162,7 @@ self-sufficient. (Mining/siphon/construction already self-retire earlier via
   non-panicking chart primitive exists (`ApiClient::chart_waypoint`, `ship.chart()`)
   but is **not wired into `t5_trader`**. Charting the freighter across distant
   asteroids is slow and is a poor use of an expensive trading ship — it belongs on
-  cheap probes. (The pathfinding panic that the original charting attempt hit when
-  routing non-market → distant non-market is now fixed; see
-  [Pathfinding](pathfinding.md).)
+  cheap probes.
 - **Intel probes** (static price-intel probes per market) were removed — they were
   no-ops in this configuration.
 
