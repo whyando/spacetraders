@@ -71,6 +71,12 @@ destination + ETA), `/api/history`, `/api/construction`, `/api/systems`,
 `/api/systems/{system}/markets`, `/api/markets/{waypoint}`, `/api/universe` (galaxy map). Dashboard
 tabs: Overview · Ships · Markets · Construction · Map.
 
+The API has no auth, so it doubles as the quickest way to inspect the live agent
+(`curl https://api.spacetraders.whyando.com/api/ships`). The dashboard SPA lives in a
+separate repo (`~/spacetraders-dashboard`, React + TypeScript + Vite), deploys to
+Cloudflare Pages at <https://spacetraders.whyando.com>, and points at the API via
+`VITE_API_BASE` (default `https://api.spacetraders.whyando.com`).
+
 ## Deploy
 
 Version bump is required to roll new code (image `pullPolicy: IfNotPresent` keeps a cached tag):
