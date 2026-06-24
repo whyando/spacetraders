@@ -125,7 +125,6 @@ pub enum ShipBehaviour {
     ConstructionHauler,
     JumpgateProbe,
     Explorer,
-    Survey,
     T5Trader,
 }
 

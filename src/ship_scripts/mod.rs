@@ -6,7 +6,6 @@ pub mod probe;
 pub mod probe_exploration;
 pub mod scrap;
 pub mod siphon;
-pub mod survey;
 pub mod t5_trader;
 
 use crate::agent_controller::{AgentController, AgentEra};

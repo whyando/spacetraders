@@ -2,7 +2,6 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 use crate::agent_controller::AgentEra;
-use crate::models::SystemSymbol;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -15,9 +14,6 @@ pub struct Config {
     pub disable_trading_tasks: bool,
     pub disable_contract_tasks: bool,
     pub era_override: Option<AgentEra>,
-    // One-time remote-system survey: an explorer (fast + sensor array) routes to this
-    // system and scans once to reveal every waypoint's traits. Parsed from SURVEY_SYSTEM.
-    pub survey_system: Option<SystemSymbol>,
 }
 
 lazy_static! {
@@ -59,12 +55,6 @@ lazy_static! {
             Ok(val) => Some(val.parse().expect("Invalid ERA_OVERRIDE")),
             Err(_) => None,
         };
-        let survey_system = match std::env::var("SURVEY_SYSTEM") {
-            Ok(val) if !val.trim().is_empty() => {
-                Some(SystemSymbol::parse(val.trim()).expect("Invalid SURVEY_SYSTEM"))
-            }
-            _ => None,
-        };
         Config {
             api_base_url,
             job_id_filter,
@@ -75,7 +65,6 @@ lazy_static! {
             no_gate_mode,
             disable_trading_tasks,
             disable_contract_tasks,
-            survey_system,
         }
     };
 }

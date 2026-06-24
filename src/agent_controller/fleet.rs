@@ -849,12 +849,6 @@ impl FleetManager {
                             ship_scripts::exploration::run_explorer(ship_controller, db, ac).await;
                         })
                     }
-                    ShipBehaviour::Survey => {
-                        let ac = ac.clone();
-                        tokio::spawn(async move {
-                            ship_scripts::survey::run_scanner(ship_controller, ac).await;
-                        })
-                    }
                     ShipBehaviour::T5Trader => {
                         let db = self.ctx.db.clone();
                         let ac = ac.clone();
