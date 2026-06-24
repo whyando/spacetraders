@@ -1,7 +1,6 @@
 # Agent architecture
 
-How this bot is organized and the logic it follows. Pairs with
-[game-notes.md](./game-notes.md) (observed game-server behavior).
+How this bot is organized and the logic it follows.
 
 ## Lifecycle / eras
 
@@ -41,7 +40,7 @@ work. Fixed in `universe/mod.rs`:
   calls `jumpgate_graph.invalidate(())` whenever a gate's connections change, so a newly-charted
   gate immediately widens the frontier for all probes. `get_with` coalesces concurrent rebuilds.
 - Under-construction gates are excluded as both source and destination, so they're never routed
-  through or to (see game-notes: you can't jump to/from a gate under construction).
+  through or to (you can't jump to/from a gate under construction).
 
 ## Charting probes (`ship_scripts/probe_exploration.rs`)
 
@@ -82,4 +81,8 @@ Version bump is required to roll new code (image `pullPolicy: IfNotPresent` keep
 
 The live release is `tst-4381` (namespace `spacetraders`, callsign `TST-4382`, schema
 `tst4382_{RESET_DATE}`). A single ship-script panic propagates through `join_handles` and crashes
-the whole agent — see game-notes for an example that caused a crashloop.
+the whole agent (the entire process exits and Kubernetes restarts the pod).
+
+For deeper dives into specific subsystems, see the [Logistics Planner](logistics-planner.md),
+[Pathfinding](pathfinding.md), [Gate Construction](gate-construction.md), and
+[T5 Trading](t5-trading.md) chapters.
