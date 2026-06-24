@@ -39,26 +39,25 @@ able to escape:
   CRUISE distance from the destination to its closest market), so the ship can still
   leave after arriving.
 
-### Known bug: hop-reconstruction panic (`src/pathfinding.rs:158`)
+### Fixed: a hop-reconstruction panic on low-fuel non-market routing
 
 After Dijkstra finds a path, the route is rebuilt hop-by-hop and each hop's edge is
-recomputed and `unwrap`ped:
+recomputed (`edge(a, b, speed, fuel_max).unwrap()`). This used to panic when routing
+**from a low-fuel ship parked on a non-market waypoint to a distant non-market
+waypoint** (e.g. a freighter hopping between far-flung asteroids).
 
-```rust
-let e = edge(a, b, speed, fuel_max).unwrap();   // can panic
-```
+Root cause: the "market → non-market dest" edge wasn't guarded to market sources. It
+budgets a *full* tank (`fuel_capacity`, since you refuel at the market), but the
+condition also fired for the non-market **source**, whose real budget is the current
+`start_fuel`. So Dijkstra would route src → dest directly on a full-tank edge, then
+reconstruction recomputed that hop with the real `start_fuel`, got `None`, and
+unwrapped it — crashing the whole agent (it runs inside a ship-script task). The
+legitimate non-market-src → dest case is handled by a separate edge with the correct
+`start_fuel` budget.
 
-The fuel budget used to *build* graph edges and the budget used to *reconstruct*
-hops aren't always in sync, so reconstruction can get `None` for a hop that Dijkstra
-believed was traversable. In practice it triggers when routing **from a non-market
-to a distant non-market waypoint** (e.g. flying a freighter between far-flung
-asteroids). Normal market-to-market trading uses the more lenient full-capacity
-budget and rarely hits it.
-
-This panic crashes the whole agent (it's inside a ship-script task). It's the reason
-the t5 traders **don't** chart asteroids — see
-[T5 Trading → Known limitations](t5-trading.md). Fixing it (reconciling the two fuel
-budgets) is prerequisite work for any charting feature.
+Fixed by guarding that edge with `x.is_market()`; a low-fuel ship now correctly
+refuels at a market before heading to a distant non-market. Covered by the
+`route_low_fuel_nonmarket_to_distant_nonmarket` regression test in `pathfinding.rs`.
 
 ## Inter-system travel (`src/universe/pathfinding.rs`)
 

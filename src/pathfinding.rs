@@ -127,7 +127,14 @@ impl Pathfinding {
                     edges.extend(edges1);
                 }
                 // add market -> non-market edge ( fuel_cost <= max_fuel - req_escape_fuel )
-                if !dest_is_market && x_symbol != dest_symbol
+                // Must be guarded to a market source: this budgets a *full* tank
+                // (you refuel at the market), so it would be wrong for the non-market
+                // source, whose real budget is start_fuel. The non-market src -> dest
+                // case is handled separately below with start_fuel. Without this guard,
+                // dijkstra would route a low-fuel ship straight from a non-market to a
+                // distant dest on a full-tank edge, then hop reconstruction (which uses
+                // start_fuel) would find that edge infeasible and panic on unwrap.
+                if !dest_is_market && x.is_market()
                     && let Some(e) = edge(x, dst, speed, fuel_capacity - req_escape_fuel) {
                         edges.push((dest_symbol.clone(), e.travel_duration));
                     }
@@ -192,6 +199,59 @@ pub struct Edge {
     pub travel_duration: i64,
     pub fuel_cost: i64,
     pub flight_mode: ShipFlightMode,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::SymbolNameDescr;
+
+    fn wp(sym: &str, x: i64, y: i64, market: bool) -> WaypointDetailed {
+        let symbol = WaypointSymbol::new(sym);
+        let traits = if market {
+            vec![SymbolNameDescr {
+                symbol: "MARKETPLACE".to_string(),
+                name: String::new(),
+                description: String::new(),
+            }]
+        } else {
+            vec![]
+        };
+        WaypointDetailed {
+            system_symbol: symbol.system(),
+            symbol,
+            waypoint_type: if market { "PLANET" } else { "ASTEROID" }.to_string(),
+            x,
+            y,
+            orbitals: vec![],
+            orbits: None,
+            faction: None,
+            traits,
+            modifiers: vec![],
+            chart: None,
+            is_under_construction: false,
+        }
+    }
+
+    // Regression: routing from a low-fuel ship parked on a non-market waypoint to a
+    // distant non-market waypoint used to panic. An unguarded "market -> dest" edge
+    // let dijkstra route src -> dest directly assuming a full tank; hop reconstruction
+    // then recomputed that edge with the real (low) start fuel, got None, and
+    // unwrapped it. The ship must instead refuel at the market first.
+    #[test]
+    fn route_low_fuel_nonmarket_to_distant_nonmarket() {
+        let gate = wp("X1-T-GATE", 0, 0, true);
+        let a1 = wp("X1-T-A1", 100, 0, false);
+        let a2 = wp("X1-T-A2", 300, 0, false);
+        let pf = Pathfinding::new(vec![gate.clone(), a1.clone(), a2.clone()]);
+
+        // At A1 with only 120 fuel: A2 is 200 away and its closest market (the gate)
+        // is 300 away, so a direct A1 -> A2 hop is infeasible. Expect a refuel stop at
+        // the gate, i.e. hops [gate, A2], rather than a panic.
+        let route = pf.get_route(&a1.symbol, &a2.symbol, 30, 120, 800);
+        let stops: Vec<_> = route.hops.iter().map(|(w, ..)| w.clone()).collect();
+        assert_eq!(stops, vec![gate.symbol.clone(), a2.symbol.clone()]);
+    }
 }
 
 pub fn edge(a: &WaypointDetailed, b: &WaypointDetailed, speed: i64, fuel_max: i64) -> Option<Edge> {

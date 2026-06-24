@@ -161,10 +161,10 @@ self-sufficient. (Mining/siphon/construction already self-retire earlier via
 - **Charting for credits**: charting uncharted waypoints earns credits, and a
   non-panicking chart primitive exists (`ApiClient::chart_waypoint`, `ship.chart()`)
   but is **not wired into `t5_trader`**. Charting the freighter across distant
-  asteroids is slow and trips a pre-existing pathfinding edge case
-  (`src/pathfinding.rs:158`, an `edge(...).unwrap()` on a route hop when routing
-  non-market → distant non-market). Charting belongs on cheap probes, and that
-  fuel-routing bug should be fixed first.
+  asteroids is slow and is a poor use of an expensive trading ship — it belongs on
+  cheap probes. (The pathfinding panic that the original charting attempt hit when
+  routing non-market → distant non-market is now fixed; see
+  [Pathfinding](pathfinding.md).)
 - **Intel probes** (static price-intel probes per market) were removed — they were
   no-ops in this configuration.
 
