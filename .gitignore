@@ -1,6 +1,7 @@
 /target
 /data
 /output
+/docs/book
 /.env
 /.env.remote
 *.log

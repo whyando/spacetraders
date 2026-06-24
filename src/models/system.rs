@@ -30,7 +30,7 @@ pub struct System {
 // P(T5) priors. Closed-form posterior over 5 generation tiers: per planet
 // independently gets a station with prob q_t (Binomial(p, q_t)); planet count
 // p ~ round(N(t+1, sigma)). The binomial coefficient C(p,o) cancels across tiers.
-// Mirrors docs/compute_t5.py.
+// See docs/src/t5-trading.md for the derivation and the wider t5-trading subsystem.
 const T5_W: [f64; 5] = [100.0, 100.0, 50.0, 20.0, 20.0]; // generation prior w_t
 const T5_MU: [f64; 5] = [2.0, 3.0, 4.0, 5.0, 6.0]; // planet-count mean mu = t+1
 const T5_Q: [f64; 5] = [0.23, 0.26, 0.32, 0.32, 0.90]; // per-planet station prob q_t

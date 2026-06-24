@@ -1,0 +1,10 @@
+[book]
+title = "SpaceTraders Agent — Knowledge Base"
+authors = ["Justin Auger"]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/whyando/spacetraders"
