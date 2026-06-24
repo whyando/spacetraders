@@ -69,6 +69,14 @@ pub struct WaypointChart {
     pub submitted_on: DateTime<Utc>,
 }
 
+// Response from POST /my/ships/{ship}/chart
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChartWaypointResponse {
+    pub chart: WaypointChart,
+    pub waypoint: WaypointDetailed,
+}
+
 impl WaypointDetailed {
     pub fn is_uncharted(&self) -> bool {
         self.traits.iter().any(|t| t.symbol == "UNCHARTED")

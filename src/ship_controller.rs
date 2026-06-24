@@ -694,6 +694,20 @@ impl ShipController {
         self.ctx.survey_manager.insert_surveys(surveys).await;
     }
 
+    // Chart the current waypoint if it isn't charted yet (earns credits and reveals
+    // its traits). Safe no-op if it's already charted or charting otherwise fails.
+    pub async fn chart(&self) {
+        assert!(!self.is_in_transit());
+        self.orbit().await;
+        self.debug(&format!("Charting {}", self.waypoint()));
+        if let Some(resp) = self.ctx.api_client.chart_waypoint(&self.ship_symbol).await {
+            self.ctx
+                .universe
+                .ingest_scanned_waypoints(&[resp.waypoint])
+                .await;
+        }
+    }
+
     // Sensor-array waypoint scan: reveals nearby waypoints' traits (markets/shipyards),
     // bypassing their uncharted state. Requires a MOUNT_SENSOR_ARRAY; triggers a cooldown.
     // Ingests the revealed traits into the universe so the agent learns the markets.

@@ -320,10 +320,15 @@ impl FleetManager {
         // *unassigned* one (e.g. a retire slot left behind after a ship is scrapped) would
         // otherwise hit the FailedNeverPurchase early-return below and starve every job
         // after it in the list (jumpgate/intel/explorer purchases).
-        for job in ship_config
-            .iter()
-            .filter(|job| !self.job_assigned(&job.id) && !job.purchase_criteria.never_purchase)
-        {
+        for job in ship_config.iter().filter(|job| {
+            !self.job_assigned(&job.id)
+                && !job.purchase_criteria.never_purchase
+                // JOB_ID_FILTER scopes which jobs we manage end-to-end: it already gates
+                // which ship scripts run, and here it gates buying too, so a single-job
+                // dev run (e.g. JOB_ID_FILTER=^t5_trader/1$) can't purchase other jobs.
+                // Default ".*" matches everything, so prod behaviour is unchanged.
+                && CONFIG.job_id_filter.is_match(&job.id)
+        }) {
             let result = self.try_buy_ship(&purchaser, job).await;
             match result {
                 BuyShipResult::Bought(ship_symbol) => {

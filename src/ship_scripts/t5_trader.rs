@@ -34,10 +34,15 @@ pub async fn run_t5_trader(ship: ShipController, _db: DbClient, ac: AgentControl
         goto_waypoint_anywhere(&ship, &gate).await;
     }
 
+    // Our cached view of this system can predate other agents charting its markets:
+    // gate systems are snapshotted once at startup, when their market waypoints may
+    // still have been uncharted (so stored as non-markets) and never refreshed since.
+    // Re-pull traits so we discover the now-charted markets to trade.
+    let waypoints = ship.ctx.universe.refresh_system_waypoints(&system).await;
+
     // The planner indexes a ship's start waypoint into the system's market set (and
-    // panics on a miss). We arrive parked on the jump gate (not a market), so move
-    // onto the nearest market first; from then on trading keeps us market-to-market.
-    let waypoints = ship.ctx.universe.get_system_waypoints(&system).await;
+    // panics on a miss). Make sure we end up on a market before trading; from then on
+    // trading keeps us market-to-market.
     let on_market = waypoints
         .iter()
         .any(|w| w.symbol == ship.waypoint() && w.is_market());

@@ -445,6 +445,17 @@ impl Universe {
         self.systems.insert(system.symbol.clone(), system);
     }
 
+    // Force a re-fetch of a system's waypoint traits from the API and ingest them,
+    // overwriting our cached details. Unlike get_system_waypoints (which trusts cached
+    // details and only fetches when some are missing), this picks up traits that were
+    // charted by other agents since we first loaded the system — e.g. markets that were
+    // uncharted at startup. Returns the fresh waypoints.
+    pub async fn refresh_system_waypoints(&self, symbol: &SystemSymbol) -> Vec<WaypointDetailed> {
+        let waypoints = self.api_client.get_system_waypoints(symbol).await;
+        self.ingest_scanned_waypoints(&waypoints).await;
+        waypoints
+    }
+
     pub async fn get_system_waypoints(&self, symbol: &SystemSymbol) -> Vec<WaypointDetailed> {
         let system = self.system(symbol);
         // Collect Vec<Option<_>> to Option<Vec<_>>

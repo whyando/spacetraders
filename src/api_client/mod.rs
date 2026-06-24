@@ -260,6 +260,25 @@ impl ApiClient {
         })
     }
 
+    // Chart the ship's current waypoint. Returns None on failure (e.g. the waypoint
+    // was already charted by another agent) rather than panicking, so a charting
+    // sweep can't crash the ship script.
+    pub async fn chart_waypoint(
+        &self,
+        ship_symbol: &str,
+    ) -> Option<api_models::ChartWaypointResponse> {
+        let path = format!("/my/ships/{}/chart", ship_symbol);
+        let (status, body): (StatusCode, Result<Data<api_models::ChartWaypointResponse>, String>) =
+            self.request(Method::POST, &path, Some(&json!({}))).await;
+        match body {
+            Ok(data) => Some(data.data),
+            Err(body) => {
+                warn!("Chart {} failed ({}): {}", ship_symbol, status.as_u16(), body);
+                None
+            }
+        }
+    }
+
     pub async fn patch<T, U>(&self, path: &str, json_body: &U) -> T
     where
         T: serde::de::DeserializeOwned,
