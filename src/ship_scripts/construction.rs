@@ -23,14 +23,37 @@ use std::cmp::min;
 async fn get_export_market(ship: &ShipController, good: &str) -> WaypointSymbol {
     let filters = vec![WaypointFilter::Exports(good.to_string())];
     let system = ship.ctx.starting_system();
-    let waypoints = ship.ctx.universe.search_waypoints(&system, &filters).await;
-    assert_eq!(
-        waypoints.len(),
-        1,
-        "Expected 1 export market for {}, got {}",
-        good,
-        waypoints.len()
+    let mut waypoints = ship.ctx.universe.search_waypoints(&system, &filters).await;
+    assert!(
+        !waypoints.is_empty(),
+        "Expected at least 1 export market for {good}, got 0"
     );
+    // The home system can have more than one exporter of a construction good (the
+    // gate's demand can spawn a second). Don't panic on >1 — that crashes the whole
+    // agent. Pick the cheapest by current purchase price, falling back to a stable
+    // symbol order when prices aren't cached yet.
+    if waypoints.len() > 1 {
+        waypoints.sort_by_key(|w| {
+            let price = ship
+                .ctx
+                .universe
+                .get_market(&w.symbol)
+                .and_then(|m| {
+                    m.data
+                        .trade_goods
+                        .iter()
+                        .find(|g| g.symbol == good)
+                        .map(|g| g.purchase_price)
+                })
+                .unwrap_or(i64::MAX);
+            (price, w.symbol.to_string())
+        });
+        warn!(
+            "Multiple export markets for {good}: {:?}; using {}",
+            waypoints.iter().map(|w| w.symbol.to_string()).collect::<Vec<_>>(),
+            waypoints[0].symbol
+        );
+    }
     waypoints[0].symbol.clone()
 }
 

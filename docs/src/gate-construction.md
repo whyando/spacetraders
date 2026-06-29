@@ -43,6 +43,9 @@ state machine:
 The exact materials are a property of the server reset (recent resets have used
 things like `FAB_MATS` and `ADVANCED_CIRCUITRY`); the code discovers the export
 markets for whatever the construction site asks for rather than hard-coding a recipe.
+A good may have more than one exporter in the home system (the gate's demand can spawn
+a second); the hauler picks the cheapest known one per good at startup rather than
+assuming a unique exporter.
 
 The hauler sources finished materials directly from export markets and delivers
 them. The home mining/siphon economy isn't a direct feeder of the gate — it funds the
