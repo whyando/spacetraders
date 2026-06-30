@@ -171,6 +171,7 @@ self-sufficient. (Mining/siphon/construction already self-retire earlier via
 | concern                         | location |
 |---------------------------------|----------|
 | P(T5) computation               | `src/models/system.rs` — `System::p_t5` |
+| P(T5) exposed to clients        | `src/web/mod.rs` — `api_universe` (`UniverseSystemNode.p_t5`); the dashboard ranks the top 100 from this |
 | reachable targets / reachability| `src/universe/pathfinding.rs` — `reachable_high_t5_systems`, `is_jumpgate_reachable` |
 | system trait refresh            | `src/universe/mod.rs` — `refresh_system_waypoints` |
 | reservations                    | `src/agent_controller/exploration.rs` — `get_t5_system_reservation` |

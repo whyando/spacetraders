@@ -383,6 +383,11 @@ struct UniverseSystemNode {
     // symbols of factions headquartered in this system (usually empty)
     #[serde(skip_serializing_if = "Vec::is_empty")]
     faction_hqs: Vec<String>,
+    // posterior P(tier-5) score; None if no planets are charted yet (see
+    // System::p_t5). Lets clients rank systems by T5 likelihood without
+    // baking in a static snapshot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    p_t5: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -435,6 +440,7 @@ async fn api_universe(State(s): State<AppState>) -> Json<UniverseMap> {
             gate_charted,
             gate_under_construction,
             faction_hqs: hqs.remove(&sys.symbol.to_string()).unwrap_or_default(),
+            p_t5: sys.p_t5(),
         });
     }
     // Undirected, deduped edges between systems with known coordinates.

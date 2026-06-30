@@ -68,8 +68,9 @@ this way and re-fetches a gate cached as not-constructed (self-heals on completi
 `web/mod.rs` serves a read-only JSON API (`WEB_PORT`, default 8080), consumed cross-origin by the
 `spacetraders-dashboard` SPA. Endpoints: `/api/agent` (incl. `era`), `/api/ships` (incl. nav
 destination + ETA), `/api/history`, `/api/construction`, `/api/systems`,
-`/api/systems/{system}/markets`, `/api/markets/{waypoint}`, `/api/universe` (galaxy map). Dashboard
-tabs: Overview · Ships · Markets · Construction · Map.
+`/api/systems/{system}/markets`, `/api/markets/{waypoint}`, `/api/universe` (galaxy map; each node
+carries a `p_t5` score where known, so the map highlights the top-100 T5 systems without a static
+snapshot). Dashboard tabs: Overview · Ships · Markets · Construction · Map.
 
 The API has no auth, so it doubles as the quickest way to inspect the live agent
 (`curl https://api.spacetraders.whyando.com/api/ships`). The dashboard SPA lives in a
