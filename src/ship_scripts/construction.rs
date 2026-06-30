@@ -32,7 +32,7 @@ async fn get_export_markets(ship: &ShipController, good: &str) -> Vec<WaypointSy
         !waypoints.is_empty(),
         "Expected at least 1 export market for {good}, got 0"
     );
-    waypoints.sort_by(|a, b| a.symbol.to_string().cmp(&b.symbol.to_string()));
+    waypoints.sort_by_key(|w| w.symbol.to_string());
     waypoints.into_iter().map(|w| w.symbol).collect()
 }
 

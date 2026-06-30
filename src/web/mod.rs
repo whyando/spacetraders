@@ -107,7 +107,8 @@ struct ShipView {
     cargo_units: i64,
     cargo_capacity: i64,
     // net signed cash this ship has moved (trade margin - fuel - jumps - purchase
-    // + scrap); excludes agent-level income like contracts. See net_cash_by_ship.
+    // + scrap + its share of contract payouts, split across deliverers by units).
+    // Excludes only the agent-level on_accepted signing bonus. See net_cash_by_ship.
     net_cash: i64,
 }
 

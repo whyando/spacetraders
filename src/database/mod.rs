@@ -45,11 +45,14 @@ pub struct MetricsPoint {
 }
 
 // One row of the cash journal. `amount` is the signed gross cash delta (negative
-// = credits out, positive = credits in). `realized_profit` is set on trade_sell
-// rows only (proceeds - cost basis of the units sold) and is NOT part of the
-// cash sum. Build one of these at every credit-changing call site and pass it to
-// DbClient::record_cash_txn — the single choke point that keeps the journal
-// complete.
+// = credits out, positive = credits in). `realized_profit` is a margin memo, NOT
+// part of the cash sum: set on `trade_sell` (proceeds - cost basis of the units
+// sold), and on contract rows so a per-ship SUM is true margin — `contract_deliver`
+// carries -(cost basis of delivered goods) and `contract_fulfill` carries the ship's
+// payout share. A contract's `on_fulfilled` payout is split into one `contract_fulfill`
+// row per delivering ship (by units), so the rows still sum to the real cash inflow.
+// Build one of these at every credit-changing call site and pass it to
+// DbClient::record_cash_txn — the single choke point that keeps the journal complete.
 pub struct CashTxn<'a> {
     pub ts: chrono::DateTime<Utc>,
     pub type_: &'a str,
@@ -549,6 +552,30 @@ impl DbClient {
         .await
         .expect("DB Query error");
         rows.into_iter().map(|r| (r.ship_symbol, r.net_cash)).collect()
+    }
+
+    // Units each ship delivered to a contract, summed from the `contract_deliver`
+    // memo rows. Used to split the contract payout across deliverers at fulfill time.
+    // Sorted by ship_symbol for deterministic remainder assignment.
+    pub async fn contract_delivery_units_by_ship(&self, contract_id: &str) -> Vec<(String, i64)> {
+        #[derive(QueryableByName)]
+        struct Row {
+            #[diesel(sql_type = Text)]
+            ship_symbol: String,
+            #[diesel(sql_type = BigInt)]
+            units: i64,
+        }
+        let rows: Vec<Row> = diesel::sql_query(
+            "SELECT ship_symbol, COALESCE(SUM(units), 0)::bigint AS units \
+             FROM agent_transaction_log \
+             WHERE type = 'contract_deliver' AND reference = $1 AND ship_symbol IS NOT NULL \
+             GROUP BY ship_symbol ORDER BY ship_symbol",
+        )
+        .bind::<Text, _>(contract_id)
+        .get_results(&mut self.conn().await)
+        .await
+        .expect("DB Query error");
+        rows.into_iter().map(|r| (r.ship_symbol, r.units)).collect()
     }
 
     pub async fn record_cash_txn(&self, t: CashTxn<'_>) {

@@ -89,19 +89,54 @@ impl ContractManager {
             _ => panic!("invalid contract action: {}", path),
         };
 
-        self.ctx
-            .db
-            .record_cash_txn(crate::database::CashTxn {
-                ts: chrono::Utc::now(),
-                type_: txn_type,
-                ship_symbol: None,
-                reference: Some(&contract_id),
-                waypoint: None,
-                units: None,
-                amount,
-                realized_profit: None,
-            })
-            .await;
+        // The on_fulfilled payout is earned by the ships that delivered the goods, so
+        // attribute it to them (split by delivered units) instead of leaving it
+        // unattributed at the agent level — otherwise contract-sourcing ships look like
+        // they only ever lose money (they eat the trade_buy cost with no offset). The
+        // on_accepted signing bonus isn't delivery-earned, so it stays agent-level.
+        // The split rows sum exactly to `amount`, keeping the cash journal reconciled.
+        let deliveries = if txn_type == "contract_fulfill" {
+            self.ctx
+                .db
+                .contract_delivery_units_by_ship(&contract_id)
+                .await
+        } else {
+            Vec::new()
+        };
+        let shares = split_payment_by_units(&deliveries, amount);
+        if !shares.is_empty() {
+            for ((ship, units), share) in deliveries.iter().zip(shares) {
+                self.ctx
+                    .db
+                    .record_cash_txn(crate::database::CashTxn {
+                        ts: chrono::Utc::now(),
+                        type_: txn_type,
+                        ship_symbol: Some(ship),
+                        reference: Some(&contract_id),
+                        waypoint: None,
+                        units: Some(*units as i32),
+                        amount: share,
+                        realized_profit: Some(share),
+                    })
+                    .await;
+            }
+        } else {
+            // accept bonus, or a contract whose deliveries predate this attribution
+            // (e.g. in flight at deploy): keep the original agent-level row.
+            self.ctx
+                .db
+                .record_cash_txn(crate::database::CashTxn {
+                    ts: chrono::Utc::now(),
+                    type_: txn_type,
+                    ship_symbol: None,
+                    reference: Some(&contract_id),
+                    waypoint: None,
+                    units: None,
+                    amount,
+                    realized_profit: None,
+                })
+                .await;
+        }
 
         self.ctx.update_contract(contract);
         self.ctx.update_agent(agent);
@@ -262,5 +297,68 @@ impl ContractManager {
                 }
             }
         }
+    }
+}
+
+// Split a contract payout across delivering ships in proportion to units delivered.
+// Returns one share per entry of `deliveries` (same order); the last ship absorbs the
+// integer-division remainder so the shares sum to `amount` exactly (the cash journal
+// must reconcile to the real credit inflow). Returns empty if there are no recorded
+// deliveries, signalling the caller to fall back to an agent-level row.
+fn split_payment_by_units(deliveries: &[(String, i64)], amount: i64) -> Vec<i64> {
+    let total: i64 = deliveries.iter().map(|(_, u)| u).sum();
+    if total <= 0 {
+        return Vec::new();
+    }
+    let n = deliveries.len();
+    let mut remaining = amount;
+    let mut shares = Vec::with_capacity(n);
+    for (i, (_, units)) in deliveries.iter().enumerate() {
+        let share = if i == n - 1 {
+            remaining
+        } else {
+            amount * units / total
+        };
+        remaining -= share;
+        shares.push(share);
+    }
+    shares
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_payment_by_units;
+
+    fn d(pairs: &[(&str, i64)]) -> Vec<(String, i64)> {
+        pairs.iter().map(|(s, u)| (s.to_string(), *u)).collect()
+    }
+
+    #[test]
+    fn splits_proportionally_and_sums_exactly() {
+        let deliveries = d(&[("A", 30), ("B", 10)]);
+        let shares = split_payment_by_units(&deliveries, 1000);
+        assert_eq!(shares, vec![750, 250]);
+        assert_eq!(shares.iter().sum::<i64>(), 1000);
+    }
+
+    #[test]
+    fn remainder_goes_to_last_ship_and_total_is_preserved() {
+        // 1000 / 3 doesn't divide evenly; rows must still sum to 1000.
+        let deliveries = d(&[("A", 1), ("B", 1), ("C", 1)]);
+        let shares = split_payment_by_units(&deliveries, 1000);
+        assert_eq!(shares, vec![333, 333, 334]);
+        assert_eq!(shares.iter().sum::<i64>(), 1000);
+    }
+
+    #[test]
+    fn single_ship_gets_everything() {
+        let shares = split_payment_by_units(&d(&[("A", 5)]), 777);
+        assert_eq!(shares, vec![777]);
+    }
+
+    #[test]
+    fn no_deliveries_returns_empty() {
+        assert!(split_payment_by_units(&[], 1000).is_empty());
+        assert!(split_payment_by_units(&d(&[("A", 0)]), 1000).is_empty());
     }
 }

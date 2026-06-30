@@ -15,11 +15,18 @@ contract is fulfilled for payment.
    ship present at a waypoint). If no static probe is available, the tick can't
    negotiate.
 2. **Accept** — if a contract exists and isn't accepted, accept it (records the
-   `on_accepted` payment in the cash journal).
+   `on_accepted` payment in the cash journal, agent-level — it isn't delivery-earned).
 3. **Deliver** — the goods are bought and delivered (see below) until every deliver
-   line's `units_fulfilled == units_required`.
-4. **Fulfill** — once all lines are met, fulfill it (records `on_fulfilled`), then the
-   next tick can negotiate a new one.
+   line's `units_fulfilled == units_required`. Each delivery drops the goods' cost
+   basis and writes a `contract_deliver` memo row (per-ship units; `amount` 0;
+   `realized_profit` = −COGS) so the payout can later be attributed to the deliverers.
+4. **Fulfill** — once all lines are met, fulfill it. The `on_fulfilled` payout is
+   **split across the ships that delivered, in proportion to units delivered**
+   (`split_payment_by_units`), as one `contract_fulfill` row per ship — so contract
+   revenue lands on the ships that earned it instead of being unattributed, while the
+   rows still sum to the real cash inflow. (Falls back to a single agent-level row if
+   no deliveries were recorded, e.g. a contract in flight at deploy.) Then the next
+   tick can negotiate a new one.
 
 `contract_tick` is invoked every ~60s from the controller loop and again immediately
 after a contract delivery completes. `may_skip=true` short-circuits when the contract
@@ -67,5 +74,6 @@ Delivery rides the normal [logistics planner](logistics-planner.md):
 | lifecycle / tick | `src/agent_controller/contract_manager.rs` — `contract_tick`, `negotiate_contract`, `accept_contract`, `fulfill_contract` |
 | model | `src/models/contract.rs` — `Contract`, terms/deliver/payment |
 | delivery task generation | `src/tasks.rs` — `generate_task_list` (contract `TransportCargo`, value ~50k) |
-| deliver action | `src/ship_controller.rs` — `deliver_contract`; `src/logistics_planner/` — `Action::DeliverContract` |
+| deliver action | `src/ship_controller.rs` — `deliver_contract` (consumes basis, writes `contract_deliver` row); `src/logistics_planner/` — `Action::DeliverContract` |
+| payout attribution | `src/agent_controller/contract_manager.rs` — `split_payment_by_units`; `src/database/mod.rs` — `contract_delivery_units_by_ship` |
 | config | `src/config.rs` — `disable_contract_tasks` (`DEBUG_DISABLE_CONTRACT_TASKS`) |

@@ -635,6 +635,28 @@ impl ShipController {
             .data;
         self.update_cargo(cargo);
         self.ctx.update_contract(contract);
+
+        // Contract delivery isn't a sale, but it's how this ship earns its share of
+        // the contract payout (credited at fulfill, split across deliverers by units).
+        // Drop the delivered units' cost basis here (otherwise it leaks and inflates
+        // net-worth valuation), and journal a memo row carrying the per-ship units and
+        // the COGS (as negative realized_profit). amount is 0 — no cash moves until
+        // fulfill. See ContractManager::contract_inner for the payout split.
+        let basis = self.ctx.ledger.register_consumption(&self.ship_symbol, good, units);
+        let wp = self.waypoint().to_string();
+        self.ctx
+            .db
+            .record_cash_txn(crate::database::CashTxn {
+                ts: chrono::Utc::now(),
+                type_: "contract_deliver",
+                ship_symbol: Some(&self.ship_symbol),
+                reference: Some(contract_id),
+                waypoint: Some(&wp),
+                units: Some(units as i32),
+                amount: 0,
+                realized_profit: Some(-basis),
+            })
+            .await;
     }
 
     pub async fn refresh_market(&self) {
