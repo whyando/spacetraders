@@ -44,8 +44,11 @@ The exact materials are a property of the server reset (recent resets have used
 things like `FAB_MATS` and `ADVANCED_CIRCUITRY`); the code discovers the export
 markets for whatever the construction site asks for rather than hard-coding a recipe.
 A good may have more than one exporter in the home system (the gate's demand can spawn
-a second); the hauler picks the cheapest known one per good at startup rather than
-assuming a unique exporter.
+a second). The hauler considers *all* of a good's export markets each trip and buys
+from whichever currently passes the supply gate (cheapest first), rather than locking
+to one. Multiple construction haulers (`NUM_CONSTRUCTION_HAULERS`) run in parallel,
+each offset by ship symbol so they prefer different markets when more than one is
+buyable instead of contending for the same one.
 
 The hauler sources finished materials directly from export markets and delivers
 them. The home mining/siphon economy isn't a direct feeder of the gate — it funds the

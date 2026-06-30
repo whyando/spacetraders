@@ -160,18 +160,23 @@ pub fn ship_config_starter_system(
         ));
     }
 
-    // Dedicated jump gate construction hauler. Same lifecycle as the extraction fleet:
-    // bought while building, then never_purchase so it stays assigned and self-scraps
-    // once the gate is built (see construction::run_hauler).
-    ships.push((
-        (4.0, 0.0),
-        ShipConfig {
-            id: "jump_gate_hauler".to_string(),
-            ship_model: "SHIP_LIGHT_HAULER".to_string(),
-            purchase_criteria: home_phase_purchase.clone(),
-            behaviour: ShipBehaviour::ConstructionHauler,
-        },
-    ));
+    // Dedicated jump gate construction haulers. Same lifecycle as the extraction fleet:
+    // bought while building, then never_purchase so they stay assigned and self-scrap
+    // once the gate is built (see construction::run_hauler). Multiple haulers spread
+    // across a good's export markets (each picks a buyable one offset by ship symbol),
+    // so they work the markets in parallel instead of contending for one.
+    const NUM_CONSTRUCTION_HAULERS: i64 = 2;
+    for i in 0..NUM_CONSTRUCTION_HAULERS {
+        ships.push((
+            (4.0, (i as f64) / (NUM_CONSTRUCTION_HAULERS as f64)),
+            ShipConfig {
+                id: format!("jump_gate_hauler/{}", i),
+                ship_model: "SHIP_LIGHT_HAULER".to_string(),
+                purchase_criteria: home_phase_purchase.clone(),
+                behaviour: ShipBehaviour::ConstructionHauler,
+            },
+        ));
+    }
 
     if incl_outer_and_siphons {
         // Add probes for the remaining markets - should we convert the old ones to static probes everywhere??
