@@ -22,10 +22,7 @@ pub struct ContractManager {
 }
 
 impl ContractManager {
-    pub fn new(
-        ctx: Arc<AgentContext>,
-        fleet: FleetManager,
-    ) -> Self {
+    pub fn new(ctx: Arc<AgentContext>, fleet: FleetManager) -> Self {
         Self {
             ctx,
             fleet,
@@ -192,8 +189,7 @@ impl ContractManager {
                         let system_symbol = deliver.destination_symbol.system();
 
                         let good = &deliver.trade_symbol;
-                        let markets =
-                            self.ctx.universe.get_system_markets(&system_symbol).await;
+                        let markets = self.ctx.universe.get_system_markets(&system_symbol).await;
 
                         let non_import_trade_exists =
                             markets.iter().any(|(market_remote, _market_opt)| {
@@ -210,11 +206,8 @@ impl ContractManager {
                             .filter_map(|(_, market_opt)| match market_opt {
                                 Some(market) => {
                                     let market_symbol = market.data.symbol.clone();
-                                    let trade = market
-                                        .data
-                                        .trade_goods
-                                        .iter()
-                                        .find(|g| g.symbol == *good);
+                                    let trade =
+                                        market.data.trade_goods.iter().find(|g| g.symbol == *good);
                                     trade.map(|trade| (market_symbol, trade))
                                 }
                                 None => None,
@@ -240,12 +233,8 @@ impl ContractManager {
                                     trade.symbol,
                                     deliver.destination_symbol
                                 );
-                                debug!(
-                                    "contract buy_trade_good: {} {:?}",
-                                    market_symbol, trade
-                                );
-                                let estimated_cost =
-                                    trade.purchase_price * deliver.units_required;
+                                debug!("contract buy_trade_good: {} {:?}", market_symbol, trade);
+                                let estimated_cost = trade.purchase_price * deliver.units_required;
                                 let reward = contract.terms.payment.on_fulfilled
                                     + contract.terms.payment.on_accepted;
                                 let profit = reward - estimated_cost;
@@ -257,16 +246,13 @@ impl ContractManager {
                                 let available_credits =
                                     self.ctx.ledger.available_credits() + 100_000;
                                 if available_credits < estimated_cost {
-                                    return ContractStatus::WillNotFulfill(
-                                        "not enough credits",
-                                    );
+                                    return ContractStatus::WillNotFulfill("not enough credits");
                                 }
 
                                 if profit <= -50_000 {
                                     ContractStatus::WillNotFulfill("profit is too low")
                                 } else {
-                                    let missing =
-                                        deliver.units_required - deliver.units_fulfilled;
+                                    let missing = deliver.units_required - deliver.units_fulfilled;
                                     ContractStatus::RequiresLogisticsTask(
                                         market_symbol.clone(),
                                         deliver.destination_symbol.clone(),

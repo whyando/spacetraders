@@ -3,10 +3,7 @@ use chrono::Duration;
 use crate::{api_client::api_models::WaypointDetailed, models::*};
 use std::collections::BTreeMap;
 
-pub fn market_waypoints(
-    waypoints: &[WaypointDetailed],
-    range: Option<i64>,
-) -> Vec<WaypointSymbol> {
+pub fn market_waypoints(waypoints: &[WaypointDetailed], range: Option<i64>) -> Vec<WaypointSymbol> {
     waypoints
         .iter()
         .filter(|w| w.is_market())

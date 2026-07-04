@@ -64,7 +64,6 @@ pub struct CashTxn<'a> {
     pub realized_profit: Option<i64>,
 }
 
-
 impl DbClient {
     pub async fn new(slice_id: &str) -> DbClient {
         let database_url = std::env::var("POSTGRES_URI").expect("POSTGRES_URI must be set");
@@ -551,7 +550,9 @@ impl DbClient {
         .get_results(&mut self.conn().await)
         .await
         .expect("DB Query error");
-        rows.into_iter().map(|r| (r.ship_symbol, r.net_cash)).collect()
+        rows.into_iter()
+            .map(|r| (r.ship_symbol, r.net_cash))
+            .collect()
     }
 
     // Units each ship delivered to a contract, summed from the `contract_deliver`
@@ -761,7 +762,8 @@ impl DbClient {
         .get_results(&mut conn)
         .await
         .expect("DB Query error");
-        let mut latest_map: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
+        let mut latest_map: std::collections::HashMap<String, i32> =
+            std::collections::HashMap::new();
         for r in latest {
             latest_map.insert(r.trade_symbol, r.fulfilled);
         }
@@ -818,12 +820,11 @@ impl DbClient {
             #[diesel(sql_type = Text)]
             waypoint: String,
         }
-        let rows: Vec<WpRow> = diesel::sql_query(
-            "SELECT DISTINCT waypoint FROM construction_log ORDER BY waypoint",
-        )
-        .get_results(&mut self.conn().await)
-        .await
-        .expect("DB Query error");
+        let rows: Vec<WpRow> =
+            diesel::sql_query("SELECT DISTINCT waypoint FROM construction_log ORDER BY waypoint")
+                .get_results(&mut self.conn().await)
+                .await
+                .expect("DB Query error");
         rows.into_iter().map(|r| r.waypoint).collect()
     }
 

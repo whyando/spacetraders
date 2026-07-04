@@ -134,15 +134,20 @@ impl Pathfinding {
                 // dijkstra would route a low-fuel ship straight from a non-market to a
                 // distant dest on a full-tank edge, then hop reconstruction (which uses
                 // start_fuel) would find that edge infeasible and panic on unwrap.
-                if !dest_is_market && x.is_market()
-                    && let Some(e) = edge(x, dst, speed, fuel_capacity - req_escape_fuel) {
-                        edges.push((dest_symbol.clone(), e.travel_duration));
-                    }
+                if !dest_is_market
+                    && x.is_market()
+                    && let Some(e) = edge(x, dst, speed, fuel_capacity - req_escape_fuel)
+                {
+                    edges.push((dest_symbol.clone(), e.travel_duration));
+                }
                 // finally add non-market -> non-market edge ( fuel_cost <= start_fuel - req_escape_fuel )
-                if !src_is_market && !dest_is_market && x_symbol == src_symbol
-                    && let Some(e) = edge(src, dst, speed, start_fuel - req_escape_fuel) {
-                        edges.push((dest_symbol.clone(), e.travel_duration));
-                    }
+                if !src_is_market
+                    && !dest_is_market
+                    && x_symbol == src_symbol
+                    && let Some(e) = edge(src, dst, speed, start_fuel - req_escape_fuel)
+                {
+                    edges.push((dest_symbol.clone(), e.travel_duration));
+                }
                 edges
             },
             |x_symbol| *x_symbol == *dest_symbol,

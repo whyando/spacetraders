@@ -61,7 +61,11 @@ impl Universe {
                 .filter(|w| w.waypoint_type == "JUMP_GATE")
                 .map(|w| w.symbol.clone());
             if let Some(gate) = gates.next() {
-                assert!(gates.next().is_none(), "Multiple jumpgates in {}", system.symbol);
+                assert!(
+                    gates.next().is_none(),
+                    "Multiple jumpgates in {}",
+                    system.symbol
+                );
                 gate_systems.insert(gate, system);
             }
         }

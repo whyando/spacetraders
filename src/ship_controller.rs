@@ -3,9 +3,9 @@ use crate::api_client::api_models::{
     ExtractResponse, JettisonResponse, NavigateResponse, OrbitResponse, RefuelResponse,
     SiphonResponse, SurveyResponse, TradeResponse, WaypointDetailed, WaypointScanResponse,
 };
+use crate::models::*;
 use crate::models::{ShipCargoItem, ShipCooldown};
 use crate::ship_controller::ShipNavStatus::*;
-use crate::models::*;
 use chrono::{DateTime, Duration, Utc};
 use log::*;
 use reqwest::{Method, StatusCode};
@@ -642,7 +642,10 @@ impl ShipController {
         // net-worth valuation), and journal a memo row carrying the per-ship units and
         // the COGS (as negative realized_profit). amount is 0 — no cash moves until
         // fulfill. See ContractManager::contract_inner for the payout split.
-        let basis = self.ctx.ledger.register_consumption(&self.ship_symbol, good, units);
+        let basis = self
+            .ctx
+            .ledger
+            .register_consumption(&self.ship_symbol, good, units);
         let wp = self.waypoint().to_string();
         self.ctx
             .db
@@ -672,7 +675,10 @@ impl ShipController {
         };
         self.ctx.universe.save_market(&waypoint, market).await;
         // Refreshing here proves it's a market; learn the trait in case our cache was stale.
-        self.ctx.universe.note_waypoint_traits(&waypoint, true, false).await;
+        self.ctx
+            .universe
+            .note_waypoint_traits(&waypoint, true, false)
+            .await;
     }
 
     pub async fn refresh_shipyard(&self) {
@@ -689,7 +695,10 @@ impl ShipController {
         self.ctx.universe.save_shipyard(&waypoint, shipyard).await;
         // Refreshing here proves it's a shipyard; learn the trait so search_shipyards (and
         // thus remote purchasing) can find it even if our startup snapshot was stale.
-        self.ctx.universe.note_waypoint_traits(&waypoint, false, true).await;
+        self.ctx
+            .universe
+            .note_waypoint_traits(&waypoint, false, true)
+            .await;
     }
 
     pub async fn survey(&self) {
@@ -738,7 +747,10 @@ impl ShipController {
         self.wait_for_cooldown().await;
         self.debug(&format!("Scanning waypoints from {}", self.waypoint()));
         let uri = format!("/my/ships/{}/scan/waypoints", self.ship_symbol);
-        let WaypointScanResponse { cooldown, waypoints } = self
+        let WaypointScanResponse {
+            cooldown,
+            waypoints,
+        } = self
             .ctx
             .api_client
             .post::<Data<WaypointScanResponse>, _>(&uri, &json!({}))

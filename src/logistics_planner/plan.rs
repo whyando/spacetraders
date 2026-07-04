@@ -55,7 +55,7 @@ impl<'a> Planner<'a> {
                             completes_task: true,
                         },
                     );
-                    
+
                     SingleBuilder::default()
                         .id(&job_id)
                         .location(self.waypoint_index(waypoint))
@@ -239,7 +239,6 @@ pub fn run_planner(
 
     let solution = Solver::new(problem.clone(), config).solve().unwrap();
 
-    
     ships
         .iter()
         .map(|ship| {

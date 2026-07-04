@@ -21,10 +21,11 @@ use std::sync::{Arc, RwLock};
 
 fn is_task_allowed(task: &Task, config: &LogisticsScriptConfig) -> bool {
     if let TaskActions::TransportCargo { dest_action, .. } = &task.actions
-        && let Action::DeliverContract(_, _) = dest_action {
-            // Allow contract delivery to bypass the normal waypoint allowlist
-            return true;
-        }
+        && let Action::DeliverContract(_, _) = dest_action
+    {
+        // Allow contract delivery to bypass the normal waypoint allowlist
+        return true;
+    }
 
     if let Some(waypoint_allowlist) = &config.waypoint_allowlist {
         match &task.actions {
@@ -162,16 +163,17 @@ impl LogisticTaskManager {
             self.agent_controller().spawn_run_ship(ship_symbol).await;
         }
         if let Some(waypoint) = shipyard_task_waypoint
-            && waypoint.system() == *system_symbol {
-                tasks.push(Task {
-                    id: format!("{}buyships_{}", system_prefix, waypoint),
-                    actions: TaskActions::VisitLocation {
-                        waypoint: waypoint.clone(),
-                        action: Action::TryBuyShips,
-                    },
-                    value: 200000,
-                });
-            }
+            && waypoint.system() == *system_symbol
+        {
+            tasks.push(Task {
+                id: format!("{}buyships_{}", system_prefix, waypoint),
+                actions: TaskActions::VisitLocation {
+                    waypoint: waypoint.clone(),
+                    action: Action::TryBuyShips,
+                },
+                value: 200000,
+            });
+        }
 
         // Contract tasks
         let contract = match self.agent_controller().contract_tick(false).await {
@@ -718,12 +720,11 @@ impl LogisticTaskManager {
             return None;
         }
 
-        let (duration_matrix, distance_matrix) =
-            crate::universe::pathfinding::full_travel_matrix(
-                &market_waypoints,
-                fuel_capacity,
-                engine_speed,
-            );
+        let (duration_matrix, distance_matrix) = crate::universe::pathfinding::full_travel_matrix(
+            &market_waypoints,
+            fuel_capacity,
+            engine_speed,
+        );
         let logistics_ship = LogisticShip {
             symbol: ship_symbol.to_string(),
             capacity: cargo_capacity,

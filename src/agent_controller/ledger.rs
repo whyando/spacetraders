@@ -74,12 +74,21 @@ impl Ledger {
         debug!("Setting {} credits reserved for {}", amount, ship_symbol);
         // Preserve any in-transit cargo basis; only (re)set the reservation.
         let mut ships = self.ships.lock().unwrap();
-        ships.entry(ship_symbol.to_string()).or_default().reserved_credits = amount;
+        ships
+            .entry(ship_symbol.to_string())
+            .or_default()
+            .reserved_credits = amount;
     }
 
     // Record a purchase of `units` into the ship's cargo at `price_per_unit`,
     // adding to the held cost basis.
-    pub fn register_purchase(&self, ship_symbol: &str, good: &str, units: i64, price_per_unit: i64) {
+    pub fn register_purchase(
+        &self,
+        ship_symbol: &str,
+        good: &str,
+        units: i64,
+        price_per_unit: i64,
+    ) {
         if units <= 0 {
             return;
         }
@@ -98,7 +107,13 @@ impl Ledger {
     // cost basis. Returns realized profit = proceeds - cost basis of the units
     // sold. Goods with no tracked basis (e.g. mined/siphoned, or bought outside
     // the trade flow) are treated as zero-cost, so the full proceeds are profit.
-    pub fn register_sale(&self, ship_symbol: &str, good: &str, units: i64, price_per_unit: i64) -> i64 {
+    pub fn register_sale(
+        &self,
+        ship_symbol: &str,
+        good: &str,
+        units: i64,
+        price_per_unit: i64,
+    ) -> i64 {
         if units <= 0 {
             return 0;
         }

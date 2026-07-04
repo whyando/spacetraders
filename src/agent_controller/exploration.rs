@@ -10,7 +10,7 @@ pub struct ExplorationManager {
     ctx: Arc<AgentContext>,
     probe_jumpgate_reservations: Arc<DashMap<String, WaypointSymbol>>,
     /// Beam-per-target: each charting probe's committed important-system target,
-    /// kept until that target's gate is charted (in-memory; re-derives on restart).
+    /// kept until that target's gate is charted (persisted, `probe_target_systems/<callsign>`).
     probe_target_systems: Arc<DashMap<String, SystemSymbol>>,
     explorer_reservations: Arc<DashMap<String, SystemSymbol>>,
     t5_system_reservations: Arc<DashMap<String, SystemSymbol>>,
@@ -89,11 +89,13 @@ impl ExplorationManager {
         let mut targets: Vec<(SystemSymbol, (i64, i64))> = Vec::new();
         for sys in self.ctx.universe.systems() {
             let sym = sys.symbol.to_string();
-            let important = sys.p_t5().map(|p| p >= T5_THRESHOLD) == Some(true)
-                || capitals.contains(&sym);
+            let important =
+                sys.p_t5().map(|p| p >= T5_THRESHOLD) == Some(true) || capitals.contains(&sym);
             if important {
-                if let Some(gate) =
-                    sys.waypoints.iter().find(|w| w.waypoint_type == "JUMP_GATE")
+                if let Some(gate) = sys
+                    .waypoints
+                    .iter()
+                    .find(|w| w.waypoint_type == "JUMP_GATE")
                 {
                     if !self.ctx.universe.connections_known(&gate.symbol) {
                         targets.push((sys.symbol.clone(), (sys.x, sys.y)));
@@ -221,10 +223,7 @@ impl ExplorationManager {
         self.probe_jumpgate_reservations.remove(ship_symbol);
         self.ctx
             .db
-            .save_probe_jumpgate_reservations(
-                &self.ctx.callsign,
-                &self.probe_jumpgate_reservations,
-            )
+            .save_probe_jumpgate_reservations(&self.ctx.callsign, &self.probe_jumpgate_reservations)
             .await;
     }
 

@@ -48,13 +48,14 @@ pub async fn run_t5_trader(ship: ShipController, _db: DbClient, ac: AgentControl
         .any(|w| w.symbol == ship.waypoint() && w.is_market());
     if !on_market {
         let here = waypoints.iter().find(|w| w.symbol == ship.waypoint());
-        let nearest_market = waypoints
-            .iter()
-            .filter(|w| w.is_market())
-            .min_by_key(|w| match here {
-                Some(h) => (w.x - h.x).pow(2) + (w.y - h.y).pow(2),
-                None => 0,
-            });
+        let nearest_market =
+            waypoints
+                .iter()
+                .filter(|w| w.is_market())
+                .min_by_key(|w| match here {
+                    Some(h) => (w.x - h.x).pow(2) + (w.y - h.y).pow(2),
+                    None => 0,
+                });
         if let Some(m) = nearest_market {
             ship.set_state_description(&format!("Repositioning to market {} to trade", m.symbol));
             goto_waypoint_anywhere(&ship, &m.symbol).await;

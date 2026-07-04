@@ -268,12 +268,19 @@ impl ApiClient {
         ship_symbol: &str,
     ) -> Option<api_models::ChartWaypointResponse> {
         let path = format!("/my/ships/{}/chart", ship_symbol);
-        let (status, body): (StatusCode, Result<Data<api_models::ChartWaypointResponse>, String>) =
-            self.request(Method::POST, &path, Some(&json!({}))).await;
+        let (status, body): (
+            StatusCode,
+            Result<Data<api_models::ChartWaypointResponse>, String>,
+        ) = self.request(Method::POST, &path, Some(&json!({}))).await;
         match body {
             Ok(data) => Some(data.data),
             Err(body) => {
-                warn!("Chart {} failed ({}): {}", ship_symbol, status.as_u16(), body);
+                warn!(
+                    "Chart {} failed ({}): {}",
+                    ship_symbol,
+                    status.as_u16(),
+                    body
+                );
                 None
             }
         }

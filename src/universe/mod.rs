@@ -6,8 +6,8 @@ use crate::database::DbClient;
 use crate::database::db_models;
 use crate::database::db_models::NewWaypointDetails;
 use crate::models::{
-    Construction, Data, Faction, Market, MarketRemoteView, Shipyard,
-    ShipyardRemoteView, System, SystemSymbol, Waypoint, WaypointSymbol, WithTimestamp,
+    Construction, Data, Faction, Market, MarketRemoteView, Shipyard, ShipyardRemoteView, System,
+    SystemSymbol, Waypoint, WaypointSymbol, WithTimestamp,
 };
 use crate::models::{SymbolNameDescr, WaypointDetails};
 use crate::pathfinding::{Pathfinding, Route};
@@ -130,7 +130,12 @@ impl Universe {
         }
         let this = self.clone();
         tokio::spawn(async move {
-            if !this.db.get_value::<bool>("galaxy_loaded").await.unwrap_or(false) {
+            if !this
+                .db
+                .get_value::<bool>("galaxy_loaded")
+                .await
+                .unwrap_or(false)
+            {
                 this.load_all_systems().await;
                 this.db.set_value("galaxy_loaded", &true).await;
                 info!("Galaxy load complete: {} systems", this.num_systems());
@@ -351,7 +356,13 @@ impl Universe {
         let materials: Vec<(String, i32, i32)> = construction
             .materials
             .iter()
-            .map(|m| (m.trade_symbol.clone(), m.fulfilled as i32, m.required as i32))
+            .map(|m| {
+                (
+                    m.trade_symbol.clone(),
+                    m.fulfilled as i32,
+                    m.required as i32,
+                )
+            })
             .collect();
         db.insert_construction_snapshot(ts, &construction.symbol, &materials)
             .await;
@@ -626,7 +637,12 @@ impl Universe {
             };
             let cur = wp.details.clone();
             let (m, y, unch, con) = match &cur {
-                Some(d) => (d.is_market, d.is_shipyard, d.is_uncharted, d.is_under_construction),
+                Some(d) => (
+                    d.is_market,
+                    d.is_shipyard,
+                    d.is_uncharted,
+                    d.is_under_construction,
+                ),
                 None => (false, false, false, false),
             };
             let new_market = m || is_market;
@@ -771,9 +787,9 @@ impl Universe {
                     .ships
                     .iter()
                     .find(|ship| ship.ship_type == ship_model)
-                {
-                    shipyards.push((waypoint.symbol.clone(), ship.purchase_price));
-                }
+            {
+                shipyards.push((waypoint.symbol.clone(), ship.purchase_price));
+            }
         }
         shipyards
     }
@@ -917,7 +933,6 @@ impl Universe {
         self.jumpgate_graph.invalidate(&()).await;
         info
     }
-
 }
 
 // Load all rows from `systems`, `waypoints` and `waypoint_details` tables

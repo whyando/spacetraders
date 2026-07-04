@@ -1,6 +1,6 @@
+use super::AgentController;
 use super::context::AgentContext;
 use super::join_handles::JoinHandles;
-use super::AgentController;
 use crate::api_client::api_models::{BuyShipResponse, WaypointDetailed};
 use crate::config::CONFIG;
 use crate::models::{ShipNavStatus::*, *};
@@ -130,9 +130,7 @@ impl FleetManager {
                 {
                     let ship = self.ctx.ships.get(assignment.value()).unwrap();
                     let ship = ship.lock().unwrap();
-                    if ship.nav.status != InTransit
-                        && ship.nav.system_symbol != starting_system
-                    {
+                    if ship.nav.status != InTransit && ship.nav.system_symbol != starting_system {
                         return Some((ship.symbol.clone(), ship.nav.waypoint_symbol.clone()));
                     }
                 }
@@ -434,10 +432,7 @@ impl FleetManager {
         // so their scripts run and self-scrap on the same era cue
         // (ship_scripts::home_phase_done) — covering a restart past the gate, where they'd
         // otherwise load unassigned and never scrap.
-        let in_home_phase = matches!(
-            era,
-            AgentEra::StartingSystem1 | AgentEra::StartingSystem2
-        );
+        let in_home_phase = matches!(era, AgentEra::StartingSystem1 | AgentEra::StartingSystem2);
         if CONFIG.no_gate_mode {
             panic!("No gate mode not supported");
         }
@@ -460,20 +455,17 @@ impl FleetManager {
             .get_jumpgate_opt(&self.ctx.starting_system())
             .await;
         let capital_reachable = match (&home_gate, &capital) {
-            (Some(home_gate), Some(capital)) => match self
-                .ctx
-                .universe
-                .get_jumpgate_opt(capital)
-                .await
-            {
-                Some(capital_gate) => {
-                    self.ctx
-                        .universe
-                        .is_jumpgate_reachable(home_gate, &capital_gate)
-                        .await
+            (Some(home_gate), Some(capital)) => {
+                match self.ctx.universe.get_jumpgate_opt(capital).await {
+                    Some(capital_gate) => {
+                        self.ctx
+                            .universe
+                            .is_jumpgate_reachable(home_gate, &capital_gate)
+                            .await
+                    }
+                    None => false,
                 }
-                None => false,
-            },
+            }
             _ => false,
         };
         let t5_purchaser_running = self
@@ -784,13 +776,8 @@ impl FleetManager {
                         let ac = ac.clone();
                         let config = config.clone();
                         tokio::spawn(async move {
-                            ship_scripts::logistics::run(
-                                ship_controller,
-                                task_manager,
-                                config,
-                                ac,
-                            )
-                            .await;
+                            ship_scripts::logistics::run(ship_controller, task_manager, config, ac)
+                                .await;
                         })
                     }
                     ShipBehaviour::SiphonDrone => {

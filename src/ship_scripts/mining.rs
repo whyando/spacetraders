@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 
 async fn sell_location(ship: &ShipController, cargo_symbol: &str) -> Option<WaypointSymbol> {
     let mut markets = Vec::new();
-    let waypoints: Vec<WaypointDetailed> = ship.ctx.universe.get_system_waypoints(&ship.system()).await;
+    let waypoints: Vec<WaypointDetailed> =
+        ship.ctx.universe.get_system_waypoints(&ship.system()).await;
     for waypoint in &waypoints {
         if waypoint.is_market() {
             let market_remote = ship.ctx.universe.get_market_remote(&waypoint.symbol).await;
@@ -89,11 +90,7 @@ pub async fn run_mining_drone(ship: ShipController, ac: AgentController) {
             // wait for cooldown before taking survey, helps to get a non-exhausted one
             ship.wait_for_cooldown().await;
             // get survey + extract
-            let survey = ship
-                .ctx
-                .survey_manager
-                .get_survey(&asteroid_location)
-                .await;
+            let survey = ship.ctx.survey_manager.get_survey(&asteroid_location).await;
             let survey = match survey {
                 Some(s) => s,
                 None => {
@@ -171,7 +168,8 @@ pub async fn run_shuttle(ship: ShipController, db: DbClient, ac: AgentController
                                 ship.refresh_market().await;
                                 while ship.cargo_good_count(&cargo.symbol) != 0 {
                                     let holding = ship.cargo_good_count(&cargo.symbol);
-                                    let market = ship.ctx.universe.get_market(&sell_location).unwrap();
+                                    let market =
+                                        ship.ctx.universe.get_market(&sell_location).unwrap();
                                     let market_good = market
                                         .data
                                         .trade_goods

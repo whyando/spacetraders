@@ -1,9 +1,8 @@
 use std::{cmp::min, sync::Arc};
 
 use crate::{
-    agent_controller::AgentController, logistics_planner::Action,
-    models::LogisticsScriptConfig, ship_controller::ShipController,
-    tasks::LogisticTaskManager,
+    agent_controller::AgentController, logistics_planner::Action, models::LogisticsScriptConfig,
+    ship_controller::ShipController, tasks::LogisticTaskManager,
 };
 use log::*;
 
@@ -68,11 +67,7 @@ pub async fn run(
     }
 }
 
-async fn execute_logistics_action(
-    ship: &ShipController,
-    action: &Action,
-    ac: &AgentController,
-) {
+async fn execute_logistics_action(ship: &ShipController, action: &Action, ac: &AgentController) {
     match action {
         Action::RefreshMarket => ship.refresh_market().await,
         Action::RefreshShipyard => ship.refresh_shipyard().await,

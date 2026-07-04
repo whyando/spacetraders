@@ -69,13 +69,12 @@ async fn api_agent(State(s): State<AppState>) -> Json<AgentSummary> {
     let num_ships = s.controller.ships().len();
     let era = format!("{:?}", s.controller.state().era);
     // latest net worth from the KPI series, falling back to liquid credits
-    let net_worth = s
-        .db
-        .get_metrics_history(1)
-        .await
-        .last()
-        .map(|m| m.net_worth)
-        .unwrap_or(agent.credits);
+    let net_worth =
+        s.db.get_metrics_history(1)
+            .await
+            .last()
+            .map(|m| m.net_worth)
+            .unwrap_or(agent.credits);
     Json(AgentSummary {
         callsign: agent.symbol,
         credits: agent.credits,
@@ -268,13 +267,12 @@ async fn api_construction(State(s): State<AppState>) -> Json<Vec<ConstructionSit
     // Only surface the jump-gate construction in our headquarters system.
     let hq_system = s.controller.agent().headquarters.system();
     let hq_gate = s.controller.ctx.universe.get_jumpgate_opt(&hq_system).await;
-    let waypoints: Vec<String> = s
-        .db
-        .construction_waypoints()
-        .await
-        .into_iter()
-        .filter(|wp| hq_gate.as_ref().map(|g| g.to_string()) == Some(wp.clone()))
-        .collect();
+    let waypoints: Vec<String> =
+        s.db.construction_waypoints()
+            .await
+            .into_iter()
+            .filter(|wp| hq_gate.as_ref().map(|g| g.to_string()) == Some(wp.clone()))
+            .collect();
     let mut sites = Vec::with_capacity(waypoints.len());
     let mut all_symbols: BTreeSet<String> = BTreeSet::new();
 
@@ -417,9 +415,14 @@ async fn api_universe(State(s): State<AppState>) -> Json<UniverseMap> {
     let mut num_gates = 0;
     let mut num_charted = 0;
     for sys in &systems {
-        let gate = sys.waypoints.iter().find(|w| w.waypoint_type == "JUMP_GATE");
+        let gate = sys
+            .waypoints
+            .iter()
+            .find(|w| w.waypoint_type == "JUMP_GATE");
         let has_gate = gate.is_some();
-        let gate_charted = gate.map(|g| u.connections_known(&g.symbol)).unwrap_or(false);
+        let gate_charted = gate
+            .map(|g| u.connections_known(&g.symbol))
+            .unwrap_or(false);
         let gate_under_construction = gate
             .and_then(|g| g.details.as_ref())
             .map(|d| d.is_under_construction)
@@ -520,26 +523,25 @@ async fn api_system_markets(
     State(s): State<AppState>,
     Path(system): Path<String>,
 ) -> Json<Vec<SystemMarketView>> {
-    let mut out: Vec<SystemMarketView> = s
-        .db
-        .get_all_markets()
-        .await
-        .into_iter()
-        .filter(|(wp, _)| wp.system().to_string() == system)
-        .map(|(wp, m)| {
-            let md = &m.data;
-            let syms = |v: &[crate::models::SymbolNameDescr]| {
-                v.iter().map(|x| x.symbol.clone()).collect::<Vec<_>>()
-            };
-            SystemMarketView {
-                waypoint: wp.to_string(),
-                imports: syms(&md.imports),
-                exports: syms(&md.exports),
-                exchange: syms(&md.exchange),
-                num_goods: md.trade_goods.len(),
-            }
-        })
-        .collect();
+    let mut out: Vec<SystemMarketView> =
+        s.db.get_all_markets()
+            .await
+            .into_iter()
+            .filter(|(wp, _)| wp.system().to_string() == system)
+            .map(|(wp, m)| {
+                let md = &m.data;
+                let syms = |v: &[crate::models::SymbolNameDescr]| {
+                    v.iter().map(|x| x.symbol.clone()).collect::<Vec<_>>()
+                };
+                SystemMarketView {
+                    waypoint: wp.to_string(),
+                    imports: syms(&md.imports),
+                    exports: syms(&md.exports),
+                    exchange: syms(&md.exchange),
+                    num_goods: md.trade_goods.len(),
+                }
+            })
+            .collect();
     out.sort_by(|a, b| a.waypoint.cmp(&b.waypoint));
     Json(out)
 }
@@ -611,13 +613,13 @@ async fn api_market(
     // Current snapshot: in-memory cache, falling back to the stored snapshot.
     let current_market = match s.controller.ctx.universe.get_market(&wp) {
         Some(m) => Some(m.data.clone()),
-        None => s
-            .db
-            .get_all_markets()
-            .await
-            .into_iter()
-            .find(|(w, _)| w == &wp)
-            .map(|(_, m)| m.data),
+        None => {
+            s.db.get_all_markets()
+                .await
+                .into_iter()
+                .find(|(w, _)| w == &wp)
+                .map(|(_, m)| m.data)
+        }
     };
     let current_goods: HashMap<String, MarketTradeGood> = current_market
         .as_ref()
@@ -633,14 +635,17 @@ async fn api_market(
     for (ts, symbol, trade_volume, supply, activity, purchase_price, sell_price) in
         s.db.market_price_history(&wp).await
     {
-        hist_map.entry(symbol).or_default().push(MarketSnapshotPoint {
-            ts: ts.to_rfc3339(),
-            supply,
-            activity,
-            trade_volume,
-            purchase_price,
-            sell_price,
-        });
+        hist_map
+            .entry(symbol)
+            .or_default()
+            .push(MarketSnapshotPoint {
+                ts: ts.to_rfc3339(),
+                supply,
+                activity,
+                trade_volume,
+                purchase_price,
+                sell_price,
+            });
     }
 
     let mut txn_map: BTreeMap<String, Vec<MarketTxnPoint>> = BTreeMap::new();
@@ -682,13 +687,12 @@ async fn api_market(
         })
         .collect();
 
-    let observations = s
-        .db
-        .market_observation_times(&wp)
-        .await
-        .into_iter()
-        .map(|ts| ts.to_rfc3339())
-        .collect();
+    let observations =
+        s.db.market_observation_times(&wp)
+            .await
+            .into_iter()
+            .map(|ts| ts.to_rfc3339())
+            .collect();
 
     Json(MarketDetailView {
         waypoint: wp.to_string(),
