@@ -9,13 +9,22 @@ markets/shipyards** as live price intel and as ship-purchase points.
 `run_jumpgate_probe` (`src/ship_scripts/probe_exploration.rs`) is a small state
 machine that maps the gate network gate-by-gate:
 
-- **Init** — reserve the nearest uncharted, unreserved, *reachable* gate
+- **Init** — reserve a frontier gate to chart next
   (`ExplorationManager::get_probe_jumpgate_reservation`,
-  `src/agent_controller/exploration.rs`, Dijkstra over the jump-gate graph). Then
-  **remotely** check the target's construction (`get_construction`, which works
-  without a ship present): if it's still under construction, record it as excluded
-  (`mark_jumpgate_under_construction`) and pick another — you can't jump to an
-  under-construction gate.
+  `src/agent_controller/exploration.rs`). Selection is **target-directed**: the
+  probes exist to open routes to the systems that matter — high-P(T5) systems and
+  faction capitals (all have gates) — so each probe *commits* to one such target
+  (`probe_target_systems`, load-balanced across the fleet) and keeps charting
+  toward it until that target's gate is charted, then re-commits to the
+  least-covered remaining target. Among reachable, uncharted, unreserved gates
+  (Dijkstra over the jump-gate graph from the probe), it picks the one minimising
+  `g + λ·h`: `g` = jump-cooldown cost to reach it, `h` = Euclidean distance from
+  its system to the committed target. Once every important system is charted the
+  heuristic vanishes (`h = 0`) and it degrades to the old **nearest-frontier**
+  policy, mapping the rest of the network. Then **remotely** check the target's
+  construction (`get_construction`, which works without a ship present): if it's
+  still under construction, record it as excluded (`mark_jumpgate_under_construction`)
+  and pick another — you can't jump to an under-construction gate.
 - **Exploring** — route to the target over charted gates, jump hop-by-hop, then
   `get_jumpgate_connections` (requires the ship to be *present*) to chart it. This
   call invalidates the jump-gate graph cache, so the newly-charted gate immediately
@@ -53,9 +62,12 @@ refreshed:
 
 Both probe kinds and the t5 traders use the same pattern: an in-memory `DashMap`
 of `ship → target`, persisted to `generic_lookup` so assignments survive restarts,
-with a mutex around the "pick nearest unreserved" critical section. Charting probes
-key on gate waypoints (`probe_jumpgate_reservations`); t5 traders key on systems
+with a mutex around the reservation critical section. Charting probes key on gate
+waypoints (`probe_jumpgate_reservations`); t5 traders key on systems
 (`t5_system_reservations`). The dormant warp explorer uses `explorer_reservations`.
+Charting probes additionally keep a `probe_target_systems` map (ship → committed
+important system) that drives the target-directed selection above; it's persisted
+the same way (`probe_target_systems/<callsign>`) so commitments survive restarts.
 
 ## Key code references
 

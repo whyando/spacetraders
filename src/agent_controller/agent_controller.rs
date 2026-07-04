@@ -136,6 +136,7 @@ impl AgentController {
             })
             .collect();
         let probe_jumpgate_reservations = db.get_probe_jumpgate_reservations(callsign).await;
+        let probe_target_systems = db.get_probe_target_systems(callsign).await;
         let explorer_reservations = db.get_explorer_reservations(callsign).await;
         let t5_system_reservations = db.get_t5_system_reservations(callsign).await;
         let task_manager = LogisticTaskManager::new(universe, db, &system_symbol).await;
@@ -192,6 +193,7 @@ impl AgentController {
         let exploration = ExplorationManager::new(
             ctx.clone(),
             probe_jumpgate_reservations,
+            probe_target_systems,
             explorer_reservations,
             t5_system_reservations,
         );

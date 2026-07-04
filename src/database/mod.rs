@@ -970,6 +970,20 @@ impl DbClient {
         self.set_value(&key, &reservations).await
     }
 
+    pub async fn get_probe_target_systems(&self, callsign: &str) -> DashMap<String, SystemSymbol> {
+        let key = format!("probe_target_systems/{}", callsign);
+        self.get_value(&key).await.unwrap_or_default()
+    }
+
+    pub async fn save_probe_target_systems(
+        &self,
+        callsign: &str,
+        targets: &DashMap<String, SystemSymbol>,
+    ) {
+        let key = format!("probe_target_systems/{}", callsign);
+        self.set_value(&key, &targets).await
+    }
+
     pub async fn get_factions(&self) -> Option<Vec<crate::models::Faction>> {
         self.get_value("factions").await
     }

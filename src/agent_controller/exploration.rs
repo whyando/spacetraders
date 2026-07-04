@@ -2,12 +2,16 @@ use super::context::AgentContext;
 use crate::models::{SystemSymbol, WaypointSymbol};
 use dashmap::DashMap;
 use pathfinding::directed::dijkstra::dijkstra_all;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ExplorationManager {
     ctx: Arc<AgentContext>,
     probe_jumpgate_reservations: Arc<DashMap<String, WaypointSymbol>>,
+    /// Beam-per-target: each charting probe's committed important-system target,
+    /// kept until that target's gate is charted (in-memory; re-derives on restart).
+    probe_target_systems: Arc<DashMap<String, SystemSymbol>>,
     explorer_reservations: Arc<DashMap<String, SystemSymbol>>,
     t5_system_reservations: Arc<DashMap<String, SystemSymbol>>,
     probe_reserve_mutex_guard: Arc<tokio::sync::Mutex<()>>,
@@ -19,12 +23,14 @@ impl ExplorationManager {
     pub fn new(
         ctx: Arc<AgentContext>,
         probe_jumpgate_reservations: DashMap<String, WaypointSymbol>,
+        probe_target_systems: DashMap<String, SystemSymbol>,
         explorer_reservations: DashMap<String, SystemSymbol>,
         t5_system_reservations: DashMap<String, SystemSymbol>,
     ) -> Self {
         Self {
             ctx,
             probe_jumpgate_reservations: Arc::new(probe_jumpgate_reservations),
+            probe_target_systems: Arc::new(probe_target_systems),
             explorer_reservations: Arc::new(explorer_reservations),
             t5_system_reservations: Arc::new(t5_system_reservations),
             probe_reserve_mutex_guard: Arc::new(tokio::sync::Mutex::new(())),
@@ -58,24 +64,140 @@ impl ExplorationManager {
         let reachables = dijkstra_all(&start, |node| {
             graph.get(node).unwrap().active_connections.clone()
         });
-        let mut reachable_gates = Vec::new();
-        for (system, distance) in &reachables {
-            reachable_gates.push((system.clone(), distance));
-        }
-        reachable_gates.sort_by_key(|(_gate, (_pre, d))| *d);
-        let target = reachable_gates.iter().find(|(gate, (_pre, _d))| {
-            let is_charted = graph.get(gate).unwrap().all_connections_known;
-            if is_charted {
-                return false;
+        // Target-directed exploration (beam-per-target). The probes exist to open
+        // routes to the systems that matter — high-P(T5) systems and faction
+        // capitals (all have gates). Each probe *commits* to one such target and
+        // keeps charting toward it until that target's gate is charted, then
+        // re-commits to the least-covered remaining target (load-balanced across
+        // the fleet). Within its beam it picks the reachable, uncharted, unreserved
+        // frontier gate minimising  g + λ·h : g = jump-cooldown cost to reach it
+        // (Dijkstra from this probe), h = Euclidean distance from its system to the
+        // committed target. With no important targets left, h = 0 and this degrades
+        // to the old nearest-frontier policy (so the rest of the network is mapped).
+        const LAMBDA: f64 = 1.0;
+        const T5_THRESHOLD: f64 = 0.5;
+
+        let capitals: HashSet<String> = self
+            .ctx
+            .universe
+            .get_factions()
+            .into_iter()
+            .filter_map(|f| f.headquarters)
+            .map(|s| s.to_string())
+            .collect();
+        let mut coords: HashMap<String, (i64, i64)> = HashMap::new();
+        let mut targets: Vec<(SystemSymbol, (i64, i64))> = Vec::new();
+        for sys in self.ctx.universe.systems() {
+            let sym = sys.symbol.to_string();
+            let important = sys.p_t5().map(|p| p >= T5_THRESHOLD) == Some(true)
+                || capitals.contains(&sym);
+            if important {
+                if let Some(gate) =
+                    sys.waypoints.iter().find(|w| w.waypoint_type == "JUMP_GATE")
+                {
+                    if !self.ctx.universe.connections_known(&gate.symbol) {
+                        targets.push((sys.symbol.clone(), (sys.x, sys.y)));
+                    }
+                }
             }
-            let reserved = self
+            coords.insert(sym, (sys.x, sys.y));
+        }
+
+        // Commit this probe to one target: keep its current commitment if that
+        // target is still uncharted, else take the least-covered remaining target
+        // (tie-break: nearest to the probe, then symbol). None once all charted.
+        let target_syms: HashSet<String> = targets.iter().map(|(s, _)| s.to_string()).collect();
+        let probe_pos = coords
+            .get(&ship_loc.system().to_string())
+            .copied()
+            .unwrap_or((0, 0));
+        let sq_dist = |a: (i64, i64), b: (i64, i64)| -> f64 {
+            let (dx, dy) = ((a.0 - b.0) as f64, (a.1 - b.1) as f64);
+            dx * dx + dy * dy
+        };
+        let keep = self
+            .probe_target_systems
+            .get(ship_symbol)
+            .map(|e| e.value().clone())
+            .filter(|s| target_syms.contains(&s.to_string()));
+        let focus_sym: Option<SystemSymbol> = keep.or_else(|| {
+            let mut load: HashMap<String, usize> = HashMap::new();
+            for e in self.probe_target_systems.iter() {
+                if e.key().as_str() != ship_symbol {
+                    let v = e.value().to_string();
+                    if target_syms.contains(&v) {
+                        *load.entry(v).or_insert(0) += 1;
+                    }
+                }
+            }
+            targets
+                .iter()
+                .min_by(|(sa, pa), (sb, pb)| {
+                    let la = *load.get(&sa.to_string()).unwrap_or(&0);
+                    let lb = *load.get(&sb.to_string()).unwrap_or(&0);
+                    la.cmp(&lb)
+                        .then_with(|| {
+                            sq_dist(probe_pos, *pa)
+                                .partial_cmp(&sq_dist(probe_pos, *pb))
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        })
+                        .then_with(|| sa.to_string().cmp(&sb.to_string()))
+                })
+                .map(|(s, _)| s.clone())
+        });
+        if let Some(focus) = &focus_sym {
+            let changed = self
+                .probe_target_systems
+                .get(ship_symbol)
+                .map(|e| e.value() != focus)
+                .unwrap_or(true);
+            if changed {
+                self.probe_target_systems
+                    .insert(ship_symbol.to_string(), focus.clone());
+                self.ctx
+                    .db
+                    .save_probe_target_systems(&self.ctx.callsign, &self.probe_target_systems)
+                    .await;
+            }
+        }
+        let focus_pos: Option<(i64, i64)> = focus_sym
+            .as_ref()
+            .and_then(|s| coords.get(&s.to_string()).copied());
+
+        let heuristic = |gate: &WaypointSymbol| -> f64 {
+            let Some(tpos) = focus_pos else {
+                return 0.0;
+            };
+            let Some(&gpos) = coords.get(&gate.system().to_string()) else {
+                return 0.0;
+            };
+            sq_dist(gpos, tpos).sqrt()
+        };
+
+        let mut candidates: Vec<(WaypointSymbol, i64)> = Vec::new();
+        for (gate, (_pre, d)) in &reachables {
+            if graph.get(gate).unwrap().all_connections_known {
+                continue;
+            }
+            if self
                 .probe_jumpgate_reservations
                 .iter()
-                .any(|x| x.value() == gate);
-            !reserved
-        });
+                .any(|x| x.value() == gate)
+            {
+                continue;
+            }
+            candidates.push((gate.clone(), *d));
+        }
+        let target = candidates
+            .into_iter()
+            .min_by(|(ga, da), (gb, db)| {
+                let sa = *da as f64 + LAMBDA * heuristic(ga);
+                let sb = *db as f64 + LAMBDA * heuristic(gb);
+                sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(gate, _)| gate);
         match target {
-            Some((target, _)) => {
+            Some(target) => {
                 self.probe_jumpgate_reservations
                     .insert(ship_symbol.to_string(), target.clone());
                 self.ctx
@@ -85,7 +207,7 @@ impl ExplorationManager {
                         &self.probe_jumpgate_reservations,
                     )
                     .await;
-                Some(target.clone())
+                Some(target)
             }
             None => None,
         }
