@@ -14,6 +14,7 @@ pub mod prelude;
 pub mod ship_config;
 pub mod ship_controller;
 pub mod ship_scripts;
+pub mod sim;
 pub mod survey_manager;
 pub mod tasks;
 pub mod util;
