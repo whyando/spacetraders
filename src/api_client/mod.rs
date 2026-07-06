@@ -118,6 +118,24 @@ impl ApiClient {
             .await
     }
 
+    // List a system's waypoints carrying a given trait (e.g. "MARKETPLACE",
+    // "SHIPYARD"). The server filters on the *real* trait, so this matches waypoints
+    // that are still UNCHARTED — unlike get_system_waypoints, whose objects hide the
+    // trait behind UNCHARTED until a ship charts the waypoint. The returned objects
+    // still show only the UNCHARTED trait; rely on membership in this list (not on the
+    // per-object traits) to learn a waypoint is a market/shipyard.
+    pub async fn get_system_waypoints_with_trait(
+        &self,
+        system_symbol: &SystemSymbol,
+        trait_symbol: &str,
+    ) -> Vec<api_models::WaypointDetailed> {
+        self.get_all_pages(&format!(
+            "/systems/{}/waypoints?traits={}",
+            system_symbol, trait_symbol
+        ))
+        .await
+    }
+
     pub async fn get_market_remote(&self, symbol: &WaypointSymbol) -> MarketRemoteView {
         let market: Data<MarketRemoteView> = self
             .get(&format!(
@@ -184,13 +202,16 @@ impl ApiClient {
     where
         T: serde::de::DeserializeOwned,
     {
+        // The path may already carry a query string (e.g. a `?traits=` filter), in
+        // which case the pagination params must be appended with `&`, not `?`.
+        let sep = if path.contains('?') { '&' } else { '?' };
         let mut page = 1;
         let mut vec = Vec::new();
         loop {
             let response: PaginatedList<T> = self
                 .get(&format!(
-                    "{}?page={}&limit={}",
-                    path, page, API_MAX_PAGE_SIZE
+                    "{}{}page={}&limit={}",
+                    path, sep, page, API_MAX_PAGE_SIZE
                 ))
                 .await;
             vec.extend(response.data);

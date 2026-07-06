@@ -100,24 +100,38 @@ Reservations hand each freighter a distinct system:
    home and the ship is bought in the (gate-reachable) capital.
 3. **Refresh the system's waypoint traits** —
    `Universe::refresh_system_waypoints` re-fetches `/systems/{sys}/waypoints` and
-   overwrites our cached details. **This is essential** (see gotcha).
-4. Reposition onto the nearest market (the planner indexes the start waypoint into
+   overwrites our cached details, picking up markets *other* agents have charted.
+4. **Discover uncharted markets** — `Universe::discover_system_markets` matches the
+   system's markets/shipyards even while their waypoints are still UNCHARTED (see
+   below). **This is what makes a fresh, unexplored T5 system tradeable** — step 3
+   alone can't reveal a market nobody has charted yet.
+5. Reposition onto the nearest market (the planner indexes the start waypoint into
    the market set and panics on a miss).
-5. Trade with a **system-scoped** `LogisticTaskManager` (the shared one only plans
+6. Trade with a **system-scoped** `LogisticTaskManager` (the shared one only plans
    the starting system, so its market set wouldn't contain this system's markets).
 
-### Gotcha: stale market data
+### Gotcha: uncharted / stale market data
 
-The agent snapshots every gate system's waypoint details once at startup
-(`load_gate_waypoints`). A system charted by *other* agents *after* our snapshot
-will still look market-less to us — `get_system_waypoints` trusts cached details and
-won't refetch. Symptom: a t5_trader arrives and logs "scheduled no tasks to
-perform" forever. The step-3 refresh fixes this; without it the freighter idles.
+Two ways a T5 system looks market-less to us on arrival:
 
-> The freighter has **no sensor array** (only a missile launcher), but it doesn't
-> need one: the market traits are public once charted, so a plain re-fetch is
-> enough. A sensor scan or per-waypoint chart is only needed to reveal *un*charted
-> waypoints.
+- **Stale snapshot.** The agent snapshots every gate system's waypoint details once
+  at startup (`load_gate_waypoints`). A system charted by *other* agents *after* our
+  snapshot still looks market-less — `get_system_waypoints` trusts cached details and
+  won't refetch. Step 3's refresh fixes this.
+- **Never charted.** A newly-reserved T5 system is often entirely UNCHARTED: nobody
+  has charted its markets, so their `MARKETPLACE` traits are hidden behind `UNCHARTED`
+  and a plain re-fetch learns nothing. Symptom: the trader arrives and logs "scheduled
+  no tasks to perform" forever, since the planner sees zero markets.
+
+Step 4 handles the second case. `/systems/{sys}/waypoints?traits=MARKETPLACE`
+filters on the *real* trait server-side, so it returns markets even while they're
+uncharted (their per-object traits still show only `UNCHARTED` — we rely on list
+membership, not the object). `discover_system_markets` OR-s those `is_market` /
+`is_shipyard` flags in via `note_waypoint_traits`, giving the planner a market set.
+The planner then emits `RefreshMarket` tasks; `ShipController::refresh_market` charts
+each uncharted market on arrival (`chart()`, earning credits + revealing traits) then
+records its live prices. The freighter has **no sensor array** (only a missile
+launcher), so this trait-filter query — not a sensor scan — is how it bootstraps.
 
 ## Fleet integration
 
@@ -158,11 +172,10 @@ self-sufficient. (Mining/siphon/construction already self-retire earlier via
 
 ## Known limitations / future work
 
-- **Charting for credits**: charting uncharted waypoints earns credits, and a
-  non-panicking chart primitive exists (`ApiClient::chart_waypoint`, `ship.chart()`)
-  but is **not wired into `t5_trader`**. Charting the freighter across distant
-  asteroids is slow and is a poor use of an expensive trading ship — it belongs on
-  cheap probes.
+- **Charting** happens opportunistically: `refresh_market` charts an uncharted market
+  the trader is *already visiting* to trade (earning credits + revealing traits). It
+  does **not** detour to chart non-market waypoints (distant asteroids etc.) — that's
+  slow and a poor use of an expensive trading ship, so it belongs on cheap probes.
 - **Intel probes** (static price-intel probes per market) were removed — they were
   no-ops in this configuration.
 
@@ -174,7 +187,8 @@ self-sufficient. (Mining/siphon/construction already self-retire earlier via
 | P(T5) exposed to clients        | `src/web/mod.rs` — `api_universe` (`UniverseSystemNode.p_t5`); the dashboard ranks the top 100 from this |
 | reachable targets / reachability| `src/universe/pathfinding.rs` — `reachable_high_t5_systems`, `is_jumpgate_reachable` |
 | system trait refresh            | `src/universe/mod.rs` — `refresh_system_waypoints` |
+| uncharted-market discovery      | `src/universe/mod.rs` — `discover_system_markets`; `src/api_client/mod.rs` — `get_system_waypoints_with_trait` |
 | reservations                    | `src/agent_controller/exploration.rs` — `get_t5_system_reservation` |
 | ship behaviour                  | `src/ship_scripts/t5_trader.rs` — `run_t5_trader` |
 | fleet emission / retirement     | `src/agent_controller/fleet.rs` — `generate_ship_config` |
-| chart primitive (unused)        | `src/api_client/mod.rs` — `chart_waypoint`; `src/ship_controller.rs` — `chart` |
+| chart-on-visit / chart primitive| `src/ship_controller.rs` — `refresh_market` (charts if `is_uncharted`), `chart`; `src/api_client/mod.rs` — `chart_waypoint` |

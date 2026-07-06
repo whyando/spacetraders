@@ -43,9 +43,17 @@ were still uncharted) is **never refetched** and looks market-less forever.
 - `refresh_system_waypoints` — force re-fetch and **overwrite** cached details. This
   is what the t5 traders call on arrival to discover markets charted after our
   snapshot. See [T5 Trading → stale traits](t5-trading.md).
+- `discover_system_markets` — learn a system's markets/shipyards even while their
+  waypoints are still **UNCHARTED**. A trait-filtered query
+  (`get_system_waypoints_with_trait`, e.g. `?traits=MARKETPLACE`) matches on the real
+  trait server-side, so it returns still-uncharted markets (their per-object traits
+  stay hidden — rely on list membership); the flags are OR-ed in via
+  `note_waypoint_traits`. This is how a t5 trader bootstraps a never-explored system.
 - `ingest_scanned_waypoints` — merge details from a sensor scan.
 - `note_waypoint_traits` — after a successful `refresh_market`/`refresh_shipyard`,
   OR-in the proven trait (so a learned market isn't "unlearned" on reload).
+- `is_uncharted()` — read the cached uncharted flag for one waypoint (unknown → false).
+  `refresh_market` uses it to chart a market on first visit.
 - `is_market()` treats every `JUMP_GATE` as a market in addition to the
   `MARKETPLACE` trait.
 
@@ -89,7 +97,7 @@ state, …), `systems`, `waypoints`, `waypoint_details`, `jumpgate_connections`,
 | concern | location |
 |---|---|
 | caches + bootstrap | `src/universe/mod.rs` — `Universe`, `spawn_galaxy_load`, `load_all_systems`, `load_gate_waypoints`, `await_systems_loaded` |
-| waypoint details | `src/universe/mod.rs` — `get_system_waypoints`, `refresh_system_waypoints`, `ingest_scanned_waypoints`, `note_waypoint_traits` |
+| waypoint details | `src/universe/mod.rs` — `get_system_waypoints`, `refresh_system_waypoints`, `discover_system_markets`, `ingest_scanned_waypoints`, `note_waypoint_traits`, `is_uncharted` |
 | market/shipyard getters | `src/universe/mod.rs` — `get_market_remote`, `get_shipyard_remote`, `get_market` |
 | market refresh | `src/ship_controller.rs` — `refresh_market`, `refresh_shipyard` |
 | market models | `src/models/market.rs` — `Market`, `MarketRemoteView` |

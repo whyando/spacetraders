@@ -467,6 +467,47 @@ impl Universe {
         waypoints
     }
 
+    // Learn a system's markets and shipyards even while their waypoints are still
+    // UNCHARTED. The waypoints list hides a waypoint's real traits behind UNCHARTED
+    // until some ship charts it, so a freshly-reached gate/T5 system has is_market()
+    // == false everywhere and the logistics planner sees no markets to trade. A
+    // trait-filtered query still matches on the underlying trait, so the server tells
+    // us which waypoints are markets/shipyards; we OR those flags in (note_waypoint_traits)
+    // so the planner has a market set to plan over. The system must already be loaded.
+    // Returns (markets_discovered, shipyards_discovered).
+    pub async fn discover_system_markets(&self, symbol: &SystemSymbol) -> (usize, usize) {
+        let markets = self
+            .api_client
+            .get_system_waypoints_with_trait(symbol, "MARKETPLACE")
+            .await;
+        for w in &markets {
+            self.note_waypoint_traits(&w.symbol, true, false).await;
+        }
+        let shipyards = self
+            .api_client
+            .get_system_waypoints_with_trait(symbol, "SHIPYARD")
+            .await;
+        for w in &shipyards {
+            self.note_waypoint_traits(&w.symbol, false, true).await;
+        }
+        (markets.len(), shipyards.len())
+    }
+
+    // Whether we currently believe a waypoint is uncharted, from the in-memory cache.
+    // Unknown waypoints (no details loaded) report false — we only chart on a positive.
+    pub fn is_uncharted(&self, waypoint: &WaypointSymbol) -> bool {
+        let Some(s) = self.systems.get(&waypoint.system()) else {
+            return false;
+        };
+        s.value()
+            .waypoints
+            .iter()
+            .find(|w| &w.symbol == waypoint)
+            .and_then(|w| w.details.as_ref())
+            .map(|d| d.is_uncharted)
+            .unwrap_or(false)
+    }
+
     pub async fn get_system_waypoints(&self, symbol: &SystemSymbol) -> Vec<WaypointDetailed> {
         let system = self.system(symbol);
         // Collect Vec<Option<_>> to Option<Vec<_>>

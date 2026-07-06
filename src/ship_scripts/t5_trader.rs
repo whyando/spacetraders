@@ -38,7 +38,24 @@ pub async fn run_t5_trader(ship: ShipController, _db: DbClient, ac: AgentControl
     // gate systems are snapshotted once at startup, when their market waypoints may
     // still have been uncharted (so stored as non-markets) and never refreshed since.
     // Re-pull traits so we discover the now-charted markets to trade.
-    let waypoints = ship.ctx.universe.refresh_system_waypoints(&system).await;
+    ship.ctx.universe.refresh_system_waypoints(&system).await;
+
+    // A newly-reserved T5 system is often still entirely UNCHARTED for us — nobody has
+    // charted its markets, so refresh_system_waypoints above learns nothing and the
+    // planner would see zero markets and schedule no tasks. Discover the markets (and
+    // shipyards) via a trait-filtered query, which matches even uncharted waypoints, so
+    // the planner has a market set to plan over. The RefreshMarket tasks that follow
+    // then visit each market, chart it, and record live prices. Re-read waypoints after
+    // so the on-market check and planner see the freshly-discovered markets.
+    let (n_markets, n_shipyards) = ship.ctx.universe.discover_system_markets(&system).await;
+    info!(
+        "T5 trader {} discovered {} markets, {} shipyards in {}",
+        ship.symbol(),
+        n_markets,
+        n_shipyards,
+        system
+    );
+    let waypoints = ship.ctx.universe.get_system_waypoints(&system).await;
 
     // The planner indexes a ship's start waypoint into the system's market set (and
     // panics on a miss). Make sure we end up on a market before trading; from then on

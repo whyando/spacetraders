@@ -666,6 +666,13 @@ impl ShipController {
         assert!(!self.is_in_transit());
         let waypoint = self.waypoint();
         let system = self.system();
+        // We're already parked on this market to read it, so if it's still uncharted
+        // (common on first contact in a bootstrapped gate/T5 system) chart it while
+        // we're here — free credits + reveals its traits to the whole fleet. The guard
+        // makes this a no-op cache check everywhere markets are already charted.
+        if self.ctx.universe.is_uncharted(&waypoint) {
+            self.chart().await;
+        }
         self.debug(&format!("Refreshing market at waypoint {}", &waypoint));
         let uri = format!("/systems/{}/waypoints/{}/market", &system, &waypoint);
         let response: Data<Market> = self.ctx.api_client.get(&uri).await;
