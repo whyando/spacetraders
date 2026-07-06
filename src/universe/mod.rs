@@ -803,6 +803,12 @@ impl Universe {
         if let Some(market) = &self.remote_markets.get(symbol) {
             return Some(market.value().clone());
         }
+        // A market we know is uncharted has no fetchable remote view — short-circuit so a
+        // planning cycle doesn't re-issue a doomed 400 for every uncharted market it holds.
+        // It resolves to Some once a ship charts it (is_uncharted flips false).
+        if self.is_uncharted(symbol) {
+            return None;
+        }
         // Layer 2 - fetch from api and save
         let market = self.api_client.get_market_remote(symbol).await?;
         self.db.save_market_remote(symbol, &market).await;
@@ -816,6 +822,10 @@ impl Universe {
         // Layer 1 - check cache
         if let Some(shipyard) = &self.remote_shipyards.get(symbol) {
             return Some(shipyard.value().clone());
+        }
+        // Skip a doomed API call for a shipyard we know is uncharted; see get_market_remote.
+        if self.is_uncharted(symbol) {
+            return None;
         }
         // Layer 2 - fetch from api and save
         let shipyard = self.api_client.get_shipyard_remote(symbol).await?;
