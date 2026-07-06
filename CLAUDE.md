@@ -15,7 +15,8 @@ via Helm. It also serves a read-only JSON API that powers a separate dashboard.
 - **`~/jpa-dev-deployment`** — Helm deploy config and **per-agent values, including
   secrets** (`POSTGRES_URI`, account token, `SCRAP_UNASSIGNED`, image tag). This is
   the canonical place for env/secrets — *not* this repo. The live agent is
-  `agents/TST-agent.yaml`. Local-only git repo (no remote).
+  `agents/WHYANDO.yaml` (there's also a dormant `TST-agent.yaml`). Local-only git repo
+  (no remote).
 - **`~/spacetraders-dashboard`** — React + TypeScript + Vite SPA, deployed to
   Cloudflare Pages at <https://spacetraders.whyando.com>. Reads the agent's read-only
   API; `npm run dev` to develop, `VITE_API_BASE` to point at another API.
@@ -32,22 +33,24 @@ via Helm. It also serves a read-only JSON API that powers a separate dashboard.
 - **Deploy** (details in docs → Architecture → Deploy):
   1. Bump `Cargo.toml` + `helm/spacetraders/Chart.yaml` (`cargo update -p st --precise <v>`).
   2. `./publish.sh` (builds + pushes the image; tag = Cargo version).
-  3. `helm upgrade tst-4381 ./helm/spacetraders --kube-context=jpa-dev -n spacetraders --reuse-values --set image.tag=<v>`.
+  3. `helm upgrade whyando ./helm/spacetraders --kube-context=jpa-dev -n spacetraders --reuse-values --set image.tag=<v>`.
   - A new version is required to roll code (`pullPolicy: IfNotPresent`). Secrets/env
     live in `~/jpa-dev-deployment`, applied via `--reuse-values`.
 
 ## Live environment & observability
 
-- Release **`tst-4381`**, namespace **`spacetraders`**, kube context **`jpa-dev`**.
-  Callsign **`TST-4382`**, schema **`tst4382_{RESET_DATE}`**.
+- Release **`whyando`** (deployment `whyando-spacetraders`), namespace
+  **`spacetraders`**, kube context **`jpa-dev`**. Callsign **`WHYANDO`**, schema
+  **`whyando_0_5_{RESET_DATE}`**. (An older `tst-4381`/`TST-4382` release still exists
+  but is scaled to 0 — don't deploy to it.)
 - **Read-only API** (served by the agent, `src/web/mod.rs`, `WEB_PORT` 8080) at
   **<https://api.spacetraders.whyando.com>**, no auth — the quickest way to inspect
   the live agent without kubectl:
   `/api/agent`, `/api/ships` (nav + per-ship net cash), `/api/history`,
   `/api/construction`, `/api/universe`, `/api/systems`,
   `/api/systems/{system}/markets`, `/api/markets/{waypoint}`.
-  e.g. `curl -s https://api.spacetraders.whyando.com/api/ships | jq '.[] | select(.symbol=="TST-4382-56")'`
-- **Logs**: `kubectl --context=jpa-dev -n spacetraders logs deploy/tst-4381-spacetraders --tail=2000`
+  e.g. `curl -s https://api.spacetraders.whyando.com/api/ships | jq '.[] | select(.symbol=="WHYANDO-1")'`
+- **Logs**: `kubectl --context=jpa-dev -n spacetraders logs deploy/whyando-spacetraders --tail=2000`
   (add `--previous` to read the pre-crash container after a restart).
 - The public SpaceTraders API itself (`https://api.spacetraders.io/v2`) serves system
   waypoints/traits without auth — handy for cross-checking what the agent believes vs.
