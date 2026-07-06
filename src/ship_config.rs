@@ -219,8 +219,17 @@ pub fn ship_config_starter_system(
             ));
         }
 
-        // Siphon drones + haulers. Same lifecycle as mining (never_purchase once past
-        // the gate so leftover ships stay assigned and self-scrap).
+        // Siphon drones + haulers — RETIRED. The siphon operation isn't worth running for
+        // the ~24h it takes to finish the gate: it's net-negative once the 8 feeder drones'
+        // purchase cost is counted (the shuttle alone is only ~breakeven). Slots are kept
+        // but forced `never_purchase`, so (a) no siphon ship is ever bought, and (b) any
+        // that already exist stay assigned and self-scrap (see `SIPHON_RETIRED` in
+        // ship_scripts/siphon.rs). To bring siphon back: restore `home_phase_purchase` here
+        // and set `SIPHON_RETIRED = false`.
+        let siphon_retired_purchase = PurchaseCriteria {
+            never_purchase: true,
+            ..PurchaseCriteria::default()
+        };
         const NUM_SIPHON_DRONES: usize = 8;
         const NUM_SIPHON_SHUTTLES: usize = 1;
         for i in 0..NUM_SIPHON_DRONES {
@@ -229,7 +238,7 @@ pub fn ship_config_starter_system(
                 ShipConfig {
                     id: format!("siphon_drone/{}", i),
                     ship_model: "SHIP_SIPHON_DRONE".to_string(),
-                    purchase_criteria: home_phase_purchase.clone(),
+                    purchase_criteria: siphon_retired_purchase.clone(),
                     behaviour: ShipBehaviour::SiphonDrone,
                 },
             ));
@@ -240,7 +249,7 @@ pub fn ship_config_starter_system(
                 ShipConfig {
                     id: format!("siphon_shuttle/{}", i),
                     ship_model: "SHIP_LIGHT_HAULER".to_string(),
-                    purchase_criteria: home_phase_purchase.clone(),
+                    purchase_criteria: siphon_retired_purchase.clone(),
                     behaviour: ShipBehaviour::SiphonShuttle,
                 },
             ));

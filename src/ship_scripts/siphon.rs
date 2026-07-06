@@ -40,6 +40,13 @@ async fn sell_location(ship: &ShipController) -> WaypointSymbol {
     waypoints[0].symbol.clone()
 }
 
+// Siphon fleet retired mid-run: with the gate ~24h from completion, the siphon operation
+// isn't worth running — it's net-negative once the 8 feeder drones' purchase cost is
+// counted (the shuttle alone is ~breakeven). Both siphon scripts scrap on sight; the
+// config slots are kept as `never_purchase` so the current ships stay assigned long enough
+// to self-scrap and none are rebought (see ship_config.rs). Flip to false to bring it back.
+const SIPHON_RETIRED: bool = true;
+
 pub async fn run_drone(ship: ShipController, ac: AgentController) {
     info!("Starting script siphon_drone for {}", ship.symbol());
     ship.wait_for_transit().await;
@@ -48,7 +55,7 @@ pub async fn run_drone(ship: ShipController, ac: AgentController) {
     ship.goto_waypoint(&siphon_location).await;
 
     loop {
-        if super::home_phase_done(&ac) {
+        if SIPHON_RETIRED || super::home_phase_done(&ac) {
             return super::scrap::run(ship).await;
         }
         let should_siphon = ship.cargo_space_available() > 0;
@@ -81,7 +88,7 @@ pub async fn run_shuttle(ship: ShipController, db: DbClient, ac: AgentController
     let mut state: SiphonShuttleState = db.get_value(&key).await.unwrap_or(Loading);
 
     loop {
-        if super::home_phase_done(&ac) {
+        if SIPHON_RETIRED || super::home_phase_done(&ac) {
             return super::scrap::run(ship).await;
         }
         match state {

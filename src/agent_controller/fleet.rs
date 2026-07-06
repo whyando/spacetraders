@@ -441,9 +441,9 @@ impl FleetManager {
         // trading t5 systems out of the capital, and the whole starting-area fleet (home
         // economy, static probes, logistics haulers, command ship) becomes obsolete. We
         // then stop emitting those slots so the ships fall unassigned and self-sell
-        // (SCRAP_UNASSIGNED). Gated additionally on the t5 purchaser probe already
-        // existing: the home fleet is what bootstraps that probe, so it must stick around
-        // until the capital pipeline is self-sufficient — otherwise nothing could buy it.
+        // (SCRAP_UNASSIGNED). Gated additionally on the first t5 trader already running
+        // (see below): the home fleet is what bootstraps the capital pipeline, so it must
+        // stick around — and keep earning — until a trader is actually online to replace it.
         // The network-charting probes (bought earlier) and t5 traders are kept.
         let capital = match era {
             AgentEra::InterSystem1 => Some(self.ctx.faction_capital()),
@@ -468,11 +468,17 @@ impl FleetManager {
             }
             _ => false,
         };
-        let t5_purchaser_running = self
+        // Gate retirement on an actual *earning* t5 trader running, not merely the
+        // purchaser probe existing: the purchaser only *enables buying* the first trader,
+        // so retiring on it would scrap the home fleet's money-makers (command ship,
+        // logistics haulers, probes) during the gap before any trader is earning. Waiting
+        // for the first `t5_trader/*` keeps a revenue stream online across the handover
+        // (and still lets the home fleet bootstrap the purchaser + first trader first).
+        let t5_trader_running = self
             .job_assignments
             .iter()
-            .any(|kv| kv.key().starts_with("t5_trader_purchaser"));
-        let retire_home_fleet = capital_reachable && t5_purchaser_running;
+            .any(|kv| kv.key().starts_with("t5_trader/"));
+        let retire_home_fleet = capital_reachable && t5_trader_running;
 
         if !retire_home_fleet {
             ships.append(&mut ship_config_starter_system(
