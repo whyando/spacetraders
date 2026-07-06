@@ -433,6 +433,32 @@ impl LogisticTaskManager {
                 value: reward as i64,
             });
         }
+        // Discovered-but-uncharted markets whose remote view isn't fetchable yet aren't in
+        // `markets` (the loop above skipped them), so emit a plain refresh-and-chart task
+        // for each so a trader still visits them and bootstraps prices — refresh_market
+        // charts on arrival. Once charted they graduate into `markets` and get the normal
+        // staleness-based reward. Skip any already covered above (an uncharted market with
+        // a ship present is fetchable, so it's in `markets` already — avoid a duplicate id).
+        let charted_market_syms: std::collections::HashSet<WaypointSymbol> =
+            markets.iter().map(|(r, _)| r.symbol.clone()).collect();
+        for w in &waypoints {
+            let is_marketplace = w.traits.iter().any(|t| t.symbol == "MARKETPLACE");
+            if !is_marketplace
+                || !w.is_uncharted()
+                || probe_locations.contains(&w.symbol)
+                || charted_market_syms.contains(&w.symbol)
+            {
+                continue;
+            }
+            tasks.push(Task {
+                id: format!("{}refreshmarket_{}", system_prefix, w.symbol),
+                actions: TaskActions::VisitLocation {
+                    waypoint: w.symbol.clone(),
+                    action: Action::RefreshMarket,
+                },
+                value: 4000,
+            });
+        }
         for (shipyard_remote, shipyard_opt) in &shipyards {
             let requires_visit = match shipyard_opt {
                 Some(_shipyard) => false,

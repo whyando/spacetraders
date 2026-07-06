@@ -133,6 +133,15 @@ each uncharted market on arrival (`chart()`, earning credits + revealing traits)
 records its live prices. The freighter has **no sensor array** (only a missile
 launcher), so this trait-filter query — not a sensor scan — is how it bootstraps.
 
+> **Uncharted markets have no remote view.** A market's remote view (imports/exports,
+> via `GET .../market`) isn't fetchable while the waypoint is uncharted *and* no ship
+> of ours is present — the API returns 4001 / HTTP 400. So `get_market_remote` /
+> `get_shipyard_remote` return `Option` (None = inaccessible), and `get_system_markets`
+> skips those. The planner instead emits a plain refresh-and-chart task for each
+> discovered-but-uncharted marketplace (`generate_task_list`); once a trader visits and
+> charts one, it graduates into the normal market set. Marking a market `is_market`
+> without this would panic the whole agent when the planner tried to fetch its remote.
+
 ## Fleet integration
 
 In the `InterSystem1` era, `generate_ship_config`

@@ -16,8 +16,9 @@ async fn sell_location(ship: &ShipController, cargo_symbol: &str) -> Option<Wayp
     let waypoints: Vec<WaypointDetailed> =
         ship.ctx.universe.get_system_waypoints(&ship.system()).await;
     for waypoint in &waypoints {
-        if waypoint.is_market() {
-            let market_remote = ship.ctx.universe.get_market_remote(&waypoint.symbol).await;
+        if waypoint.is_market()
+            && let Some(market_remote) = ship.ctx.universe.get_market_remote(&waypoint.symbol).await
+        {
             let market_opt = ship.ctx.universe.get_market(&waypoint.symbol);
             markets.push((market_remote, market_opt));
         }

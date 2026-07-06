@@ -727,7 +727,12 @@ impl Universe {
         let mut markets = Vec::new();
         for waypoint in &waypoints {
             if waypoint.is_market() {
-                let market_remote = self.get_market_remote(&waypoint.symbol).await;
+                // Skip markets we can't fetch yet (discovered but still uncharted, no
+                // ship present) — they have no remote view to plan trades over. They're
+                // handled separately as plain refresh-and-chart targets in the planner.
+                let Some(market_remote) = self.get_market_remote(&waypoint.symbol).await else {
+                    continue;
+                };
                 let market_opt = self.get_market(&waypoint.symbol);
                 markets.push((market_remote, market_opt));
             }
@@ -743,7 +748,10 @@ impl Universe {
         let mut shipyards = Vec::new();
         for waypoint in &waypoints {
             if waypoint.is_shipyard() {
-                let shipyard_remote = self.get_shipyard_remote(&waypoint.symbol).await;
+                // Skip shipyards we can't fetch yet (discovered but uncharted).
+                let Some(shipyard_remote) = self.get_shipyard_remote(&waypoint.symbol).await else {
+                    continue;
+                };
                 let shipyard_opt = self.get_shipyard(&waypoint.symbol);
                 shipyards.push((shipyard_remote, shipyard_opt));
             }
@@ -755,8 +763,9 @@ impl Universe {
         let waypoints = self.get_system_waypoints(symbol).await;
         let mut markets = Vec::new();
         for waypoint in &waypoints {
-            if waypoint.is_market() {
-                let market_remote = self.get_market_remote(&waypoint.symbol).await;
+            if waypoint.is_market()
+                && let Some(market_remote) = self.get_market_remote(&waypoint.symbol).await
+            {
                 markets.push(market_remote);
             }
         }
@@ -770,8 +779,9 @@ impl Universe {
         let waypoints = self.get_system_waypoints(symbol).await;
         let mut shipyards = Vec::new();
         for waypoint in &waypoints {
-            if waypoint.is_shipyard() {
-                let shipyard_remote = self.get_shipyard_remote(&waypoint.symbol).await;
+            if waypoint.is_shipyard()
+                && let Some(shipyard_remote) = self.get_shipyard_remote(&waypoint.symbol).await
+            {
                 shipyards.push(shipyard_remote);
             }
         }
@@ -786,29 +796,33 @@ impl Universe {
             .unwrap()
     }
 
-    pub async fn get_market_remote(&self, symbol: &WaypointSymbol) -> MarketRemoteView {
+    // None if the market isn't accessible yet — a discovered-but-uncharted market with
+    // no ship of ours present. Once charted (or a ship arrives) it resolves to Some.
+    pub async fn get_market_remote(&self, symbol: &WaypointSymbol) -> Option<MarketRemoteView> {
         // Layer 1 - check cache
         if let Some(market) = &self.remote_markets.get(symbol) {
-            return market.value().clone();
+            return Some(market.value().clone());
         }
         // Layer 2 - fetch from api and save
-        let market = self.api_client.get_market_remote(symbol).await;
+        let market = self.api_client.get_market_remote(symbol).await?;
         self.db.save_market_remote(symbol, &market).await;
         self.remote_markets.insert(symbol.clone(), market.clone());
-        market
+        Some(market)
     }
 
-    pub async fn get_shipyard_remote(&self, symbol: &WaypointSymbol) -> ShipyardRemoteView {
+    // None if the shipyard isn't accessible yet (uncharted, no ship present); see
+    // get_market_remote.
+    pub async fn get_shipyard_remote(&self, symbol: &WaypointSymbol) -> Option<ShipyardRemoteView> {
         // Layer 1 - check cache
         if let Some(shipyard) = &self.remote_shipyards.get(symbol) {
-            return shipyard.value().clone();
+            return Some(shipyard.value().clone());
         }
         // Layer 2 - fetch from api and save
-        let shipyard = self.api_client.get_shipyard_remote(symbol).await;
+        let shipyard = self.api_client.get_shipyard_remote(symbol).await?;
         self.db.save_shipyard_remote(symbol, &shipyard).await;
         self.remote_shipyards
             .insert(symbol.clone(), shipyard.clone());
-        shipyard
+        Some(shipyard)
     }
 
     pub async fn search_shipyards(
@@ -841,21 +855,27 @@ impl Universe {
                 if !waypoint.is_market() {
                     return false;
                 }
-                let market = self.get_market_remote(&waypoint.symbol).await;
+                let Some(market) = self.get_market_remote(&waypoint.symbol).await else {
+                    return false;
+                };
                 market.imports.iter().any(|import| import.symbol == *good)
             }
             WaypointFilter::Exports(good) => {
                 if !waypoint.is_market() {
                     return false;
                 }
-                let market = self.get_market_remote(&waypoint.symbol).await;
+                let Some(market) = self.get_market_remote(&waypoint.symbol).await else {
+                    return false;
+                };
                 market.exports.iter().any(|export| export.symbol == *good)
             }
             WaypointFilter::Exchanges(good) => {
                 if !waypoint.is_market() {
                     return false;
                 }
-                let market = self.get_market_remote(&waypoint.symbol).await;
+                let Some(market) = self.get_market_remote(&waypoint.symbol).await else {
+                    return false;
+                };
                 market
                     .exchange
                     .iter()

@@ -136,26 +136,32 @@ impl ApiClient {
         .await
     }
 
-    pub async fn get_market_remote(&self, symbol: &WaypointSymbol) -> MarketRemoteView {
-        let market: Data<MarketRemoteView> = self
-            .get(&format!(
-                "/systems/{}/waypoints/{}/market",
-                symbol.system(),
-                symbol
-            ))
-            .await;
-        market.data
+    // Returns None if the waypoint's market isn't accessible — i.e. it's still
+    // UNCHARTED with no ship of ours present (API error 4001, HTTP 400). Callers that
+    // discovered a market via a trait filter can hold is_market=true for such a
+    // waypoint before it's ever been charted, so this must not panic.
+    pub async fn get_market_remote(&self, symbol: &WaypointSymbol) -> Option<MarketRemoteView> {
+        let path = format!("/systems/{}/waypoints/{}/market", symbol.system(), symbol);
+        let (code, body): (StatusCode, Result<Data<MarketRemoteView>, String>) =
+            self.request(Method::GET, &path, None::<&()>).await;
+        match code {
+            StatusCode::OK => Some(body.unwrap().data),
+            StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND => None,
+            _ => panic!("Request failed: {} GET {}", code.as_u16(), path),
+        }
     }
 
-    pub async fn get_shipyard_remote(&self, symbol: &WaypointSymbol) -> ShipyardRemoteView {
-        let shipyard: Data<ShipyardRemoteView> = self
-            .get(&format!(
-                "/systems/{}/waypoints/{}/shipyard",
-                symbol.system(),
-                symbol
-            ))
-            .await;
-        shipyard.data
+    // None if the shipyard isn't accessible (uncharted, no ship present); see
+    // get_market_remote.
+    pub async fn get_shipyard_remote(&self, symbol: &WaypointSymbol) -> Option<ShipyardRemoteView> {
+        let path = format!("/systems/{}/waypoints/{}/shipyard", symbol.system(), symbol);
+        let (code, body): (StatusCode, Result<Data<ShipyardRemoteView>, String>) =
+            self.request(Method::GET, &path, None::<&()>).await;
+        match code {
+            StatusCode::OK => Some(body.unwrap().data),
+            StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND => None,
+            _ => panic!("Request failed: {} GET {}", code.as_u16(), path),
+        }
     }
 
     pub async fn get_construction(
