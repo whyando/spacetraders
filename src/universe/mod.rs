@@ -108,6 +108,37 @@ impl Universe {
         }
     }
 
+    // Test seam: build a Universe directly from in-memory caches, bypassing the DB load
+    // in `new`. `systems_ready` starts true so full-galaxy consumers don't block. Used to
+    // exercise pure-over-cache builders (jumpgate/warp graphs) offline — the DB is
+    // `disconnected` and must not be touched, so pre-populate `constructions` for any
+    // under-construction gate the build will confirm.
+    #[cfg(test)]
+    pub(crate) fn from_caches_for_test(
+        api_client: ApiClient,
+        db: DbClient,
+        systems: Vec<(SystemSymbol, System)>,
+        jumpgates: Vec<(WaypointSymbol, JumpGateInfo)>,
+        constructions: Vec<(WaypointSymbol, Arc<WithTimestamp<Option<Construction>>>)>,
+    ) -> Universe {
+        let (systems_ready, _) = tokio::sync::watch::channel(true);
+        Universe {
+            api_client,
+            db,
+            systems: DashMap::from_iter(systems),
+            constructions: DashMap::from_iter(constructions),
+            remote_markets: DashMap::new(),
+            remote_shipyards: DashMap::new(),
+            markets: DashMap::new(),
+            shipyards: DashMap::new(),
+            factions: DashMap::new(),
+            jumpgates: DashMap::from_iter(jumpgates),
+            systems_ready,
+            warp_jump_graph: Cache::new(1),
+            jumpgate_graph: Cache::new(1),
+        }
+    }
+
     // Wait until the full galaxy has been loaded (returns immediately if already loaded).
     pub async fn await_systems_loaded(&self) {
         let mut rx = self.systems_ready.subscribe();

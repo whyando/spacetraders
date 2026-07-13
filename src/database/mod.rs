@@ -65,6 +65,18 @@ pub struct CashTxn<'a> {
 }
 
 impl DbClient {
+    // Test-only DbClient whose pool is never dialed (deadpool connects lazily on first
+    // `get()`). Lets offline tests construct a Universe without a live Postgres, as long
+    // as the code under test never actually touches the DB (e.g. a graph build over
+    // pre-populated in-memory caches).
+    #[cfg(test)]
+    pub(crate) fn disconnected() -> DbClient {
+        let manager =
+            AsyncDieselConnectionManager::<AsyncPgConnection>::new("postgres://disconnected/db");
+        let db = Pool::builder(manager).max_size(1).build().unwrap();
+        DbClient { db }
+    }
+
     pub async fn new(slice_id: &str) -> DbClient {
         let database_url = std::env::var("POSTGRES_URI").expect("POSTGRES_URI must be set");
         info!("Using schema: {}", slice_id);

@@ -65,6 +65,12 @@ traversable jump connections:
   (one-time, `gate_construction_loaded` marker), which fetches each under-construction
   gate's site and then invalidates the graph. Under-construction gates are excluded as
   both source and destination — you can't jump to or from them.
+  - **Enforced, not just documented**: the build runs inside `api_client::no_io_section`,
+    so *any* HTTP request from the builder panics immediately (naming the section) rather
+    than silently storming the API and tripping the lock timeout downstream. An offline
+    unit test (`builder_no_io_tests`) builds the graph with a disconnected DB + unused
+    client and relies on this guard to assert zero API calls — the regression test for the
+    two crashes.
 - **Edges**: only **charted** gates (`self.jumpgates`) contribute connections; each
   edge has `cooldown = 60 + distance`. A reverse edge is added only when the
   destination isn't itself charted (a charted gate emits its own edges), which avoids
@@ -122,3 +128,4 @@ Both graphs are memoized in `moka` caches keyed on `()`:
 | in-system execution | `src/ship_controller.rs` — `goto_waypoint`, `navigate`, `warp`, `jump`, `refuel` |
 | cross-system execution | `src/ship_scripts/probe.rs` — `goto_waypoint_anywhere` |
 | graph caching/invalidation | `src/universe/mod.rs` — `jumpgate_graph`, `get_jumpgate_connections` |
+| no-I/O guard for builders | `src/api_client/mod.rs` — `no_io_section`, `guard_no_io` |

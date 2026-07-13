@@ -45,7 +45,17 @@ impl Universe {
         // Needs the full galaxy: wait for the one-time background load.
         self.await_systems_loaded().await;
         self.jumpgate_graph
-            .get_with((), async { Arc::new(self.build_jumpgate_graph().await) })
+            .get_with((), async {
+                // The build must read only cached/DB state, never the API: it can run
+                // under the try_buy_ships lock, whose 30s timeout is fatal. Enforce it.
+                Arc::new(
+                    crate::api_client::no_io_section(
+                        "build_jumpgate_graph",
+                        self.build_jumpgate_graph(),
+                    )
+                    .await,
+                )
+            })
             .await
     }
 
@@ -225,8 +235,12 @@ impl Universe {
             .get_with((), async {
                 const EXPLORER_FUEL_CAPACITY: i64 = 800;
                 const EXPLORER_SPEED: i64 = 30;
-                self._warp_jump_graph(EXPLORER_FUEL_CAPACITY, EXPLORER_SPEED)
-                    .await
+                // Cache-only build (reads jumpgate_graph + cached systems); forbid I/O.
+                crate::api_client::no_io_section(
+                    "warp_jump_graph",
+                    self._warp_jump_graph(EXPLORER_FUEL_CAPACITY, EXPLORER_SPEED),
+                )
+                .await
             })
             .await
     }
@@ -422,4 +436,105 @@ pub fn full_travel_matrix(
         }
     }
     (durations, distances)
+}
+
+#[cfg(test)]
+mod builder_no_io_tests {
+    use super::*;
+    use crate::api_client::ApiClient;
+    use crate::database::DbClient;
+    use crate::models::{Construction, Waypoint, WaypointDetails, WithTimestamp};
+    use crate::universe::JumpGateInfo;
+
+    fn gate_system(sym: &str, x: i64, y: i64, under_construction: bool) -> (SystemSymbol, System) {
+        let system = SystemSymbol::new(sym);
+        let gate = WaypointSymbol::new(&format!("{sym}-I1"));
+        let waypoint = Waypoint {
+            id: 0,
+            symbol: gate,
+            waypoint_type: "JUMP_GATE".to_string(),
+            x,
+            y,
+            details: Some(WaypointDetails {
+                is_market: false,
+                is_shipyard: false,
+                is_uncharted: false,
+                is_under_construction: under_construction,
+            }),
+        };
+        (
+            system.clone(),
+            System {
+                symbol: system,
+                system_type: "STAR".to_string(),
+                x,
+                y,
+                waypoints: vec![waypoint],
+            },
+        )
+    }
+
+    // The jumpgate graph build must read only cached/DB state — never the API — because it
+    // runs under the try_buy_ships lock (30s fatal timeout). This is the regression test
+    // for the two construction-sweep crashes: build the graph offline with a disconnected
+    // DB and an unused ApiClient. If the build issues any request, the Phase-A no_io_section
+    // guard panics; a clean run proves zero API calls. Also checks under-construction gates
+    // are excluded.
+    #[tokio::test]
+    async fn jumpgate_graph_build_makes_no_api_calls() {
+        let gate = |s: &str| WaypointSymbol::new(&format!("{s}-I1"));
+        let (ga, gb, gc) = (gate("X1-AA1"), gate("X1-BB2"), gate("X1-CC3"));
+
+        let systems = vec![
+            gate_system("X1-AA1", 0, 0, false),  // constructed
+            gate_system("X1-BB2", 10, 0, false), // constructed
+            gate_system("X1-CC3", 0, 10, true),  // under construction -> excluded
+        ];
+        // Only A is charted; its edges reach B (constructed) and C (under construction).
+        let jumpgates = vec![(
+            ga.clone(),
+            JumpGateInfo {
+                is_constructed: true,
+                connections: vec![gb.clone(), gc.clone()],
+            },
+        )];
+        // Pre-populate C's construction site so construction_cached is an in-memory hit and
+        // the (disconnected) DB is never touched.
+        let constructions = vec![(
+            gc.clone(),
+            Arc::new(WithTimestamp {
+                timestamp: chrono::Utc::now(),
+                data: Some(Construction {
+                    symbol: gc.clone(),
+                    materials: vec![],
+                    is_complete: false,
+                }),
+            }),
+        )];
+
+        let universe = Universe::from_caches_for_test(
+            ApiClient::for_test(),
+            DbClient::disconnected(),
+            systems,
+            jumpgates,
+            constructions,
+        );
+
+        // Panics via the no_io_section guard if the build fetches; a clean return == 0 calls.
+        let graph = universe.jumpgate_graph().await;
+
+        assert!(graph.get(&ga).unwrap().is_constructed);
+        assert!(graph.get(&gb).unwrap().is_constructed);
+        assert!(
+            !graph.get(&gc).unwrap().is_constructed,
+            "gc under construction"
+        );
+
+        let a_edges = &graph.get(&ga).unwrap().active_connections;
+        assert!(a_edges.iter().any(|(w, _)| w == &gb), "A->B edge present");
+        assert!(
+            !a_edges.iter().any(|(w, _)| w == &gc),
+            "A->C excluded (gc under construction)"
+        );
+    }
 }

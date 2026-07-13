@@ -12,6 +12,37 @@ use tokio::time::Instant;
 
 const API_MAX_PAGE_SIZE: usize = 20;
 
+tokio::task_local! {
+    // When set (via `no_io_section`), naming the section, any HTTP request issued on
+    // this task panics. Enforces that pure-compute paths that must read only cached
+    // state — the jumpgate/warp graph builders — never fall through to the network.
+    // A silent galaxy-wide fetch storm there once held the try_buy_ships lock past its
+    // 30s fail-fast timeout and crash-looped the agent (twice); this turns that into an
+    // instant, named panic at the offending call. See docs: universe-data / pathfinding.
+    static NO_IO_SECTION: &'static str;
+}
+
+/// Run `fut` in a "no network I/O" section: any [`ApiClient`] request issued while it
+/// runs (on this task) panics, naming `label`. Use to assert that pure-over-cache code
+/// never fetches. Not inherited across `tokio::spawn` (task-locals don't propagate).
+pub async fn no_io_section<F>(label: &'static str, fut: F) -> F::Output
+where
+    F: std::future::Future,
+{
+    NO_IO_SECTION.scope(label, fut).await
+}
+
+/// Panic if called inside a [`no_io_section`]. Invoked at the single request funnel so
+/// every HTTP verb is covered. No-op outside a section.
+fn guard_no_io(method: &Method, path: &str) {
+    if let Ok(section) = NO_IO_SECTION.try_with(|s| *s) {
+        panic!(
+            "API {method} {path} attempted inside no-I/O section '{section}' — this path \
+             must read only cached state (see api_client::no_io_section)"
+        );
+    }
+}
+
 #[derive(Clone)]
 pub struct ApiClient {
     base_url: String,
@@ -27,6 +58,19 @@ impl Default for ApiClient {
 }
 
 impl ApiClient {
+    // Test-only client that skips CONFIG (which requires SPACETRADERS_API_URL) and is
+    // never dialed. For offline tests of code that must not do I/O — the no_io_section
+    // guard fires before any request would reach the (invalid) base_url.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> ApiClient {
+        ApiClient {
+            client: reqwest::Client::new(),
+            base_url: "http://test.invalid".to_string(),
+            agent_token: Arc::new(RwLock::new(None)),
+            next_request_ts: Arc::new(Mutex::new(None)),
+        }
+    }
+
     pub fn new() -> ApiClient {
         let user_agent = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         let client = reqwest::ClientBuilder::new()
@@ -448,6 +492,7 @@ impl ApiClient {
     where
         U: Serialize,
     {
+        guard_no_io(&method, path);
         self.wait_rate_limit().await;
         let url = format!("{}{}", self.base_url, path);
         let mut request = self.client.request(method.clone(), &url);
@@ -472,5 +517,38 @@ impl ApiClient {
         } else {
             (status, Err(response_body))
         }
+    }
+}
+
+#[cfg(test)]
+mod no_io_tests {
+    use super::*;
+
+    // Inside a no_io_section, the request funnel's guard panics (naming the section) —
+    // before any network work. This is what makes a builder-does-I/O regression fail
+    // loudly at the offending call instead of as a downstream lock-timeout.
+    #[tokio::test]
+    #[should_panic(expected = "no-I/O section 'build_jumpgate_graph'")]
+    async fn guard_panics_inside_section() {
+        no_io_section("build_jumpgate_graph", async {
+            guard_no_io(
+                &Method::GET,
+                "/systems/X1-HN29/waypoints/X1-HN29-I60/construction",
+            );
+        })
+        .await;
+    }
+
+    // Outside any section the guard is a no-op (normal requests proceed).
+    #[test]
+    fn guard_noop_outside_section() {
+        guard_no_io(&Method::GET, "/my/ships");
+    }
+
+    // Sections don't leak across sibling tasks / after the scope ends.
+    #[tokio::test]
+    async fn guard_scope_is_bounded() {
+        no_io_section("warp_jump_graph", async {}).await;
+        guard_no_io(&Method::POST, "/my/ships"); // must not panic after scope exits
     }
 }
