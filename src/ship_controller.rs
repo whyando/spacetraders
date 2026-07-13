@@ -100,6 +100,10 @@ impl ShipController {
         let ship = self.ship.lock().unwrap();
         ship.cargo.inventory.first().cloned()
     }
+    pub fn cargo_inventory(&self) -> Vec<ShipCargoItem> {
+        let ship = self.ship.lock().unwrap();
+        ship.cargo.inventory.clone()
+    }
     pub fn cargo_good_count(&self, good: &str) -> i64 {
         let ship = self.ship.lock().unwrap();
         ship.cargo

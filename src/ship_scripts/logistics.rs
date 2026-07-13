@@ -2,7 +2,7 @@ use std::{cmp::min, sync::Arc};
 
 use crate::{
     agent_controller::AgentController, logistics_planner::Action, models::LogisticsScriptConfig,
-    ship_controller::ShipController, tasks::LogisticTaskManager,
+    ship_controller::ShipController, tasks::LogisticTaskManager, universe::WaypointFilter,
 };
 use log::*;
 
@@ -36,6 +36,14 @@ pub async fn run(
         .await;
 
     loop {
+        // Before taking work: if the ship has no in-progress task, its hold should be
+        // empty. Anything in it is stray — e.g. a trade whose sell leg never ran because
+        // a crash interrupted it — which silently eats capacity and can overflow the next
+        // buy. Clear it here (safe: no in-flight task good to protect).
+        if taskmanager.get_next_action(&ship_symbol).is_none() {
+            reconcile_stray_cargo(&ship_controller).await;
+        }
+
         // Get next action from task manager
         let action = match taskmanager
             .get_next_task(&ship_symbol, &ship_controller.waypoint())
@@ -67,6 +75,78 @@ pub async fn run(
     }
 }
 
+// Dispose of cargo the ship is holding while it owns no task. Called only when the task
+// queue is empty, so every held good is stray (a completed task always empties the hold)
+// — most commonly a good bought for a trade whose sell leg was lost to a crash. Each stray
+// good is sold at an in-system market that buys it (import or exchange), or jettisoned as a
+// last resort so it can't permanently occupy the hold. FUEL is never touched — cargo fuel
+// is intentional for long jumps.
+async fn reconcile_stray_cargo(ship: &ShipController) {
+    let stray: Vec<_> = ship
+        .cargo_inventory()
+        .into_iter()
+        .filter(|item| item.symbol != "FUEL")
+        .collect();
+    if stray.is_empty() {
+        return;
+    }
+    let system = ship.system();
+    for item in stray {
+        let good = item.symbol;
+        warn!(
+            "{}: stray cargo {} x{} with no owning task — disposing",
+            ship.symbol(),
+            good,
+            item.units
+        );
+        // A market buys a good if it imports or exchanges it.
+        let mut buyers = ship
+            .ctx
+            .universe
+            .search_waypoints(&system, &[WaypointFilter::Imports(good.clone())])
+            .await;
+        if buyers.is_empty() {
+            buyers = ship
+                .ctx
+                .universe
+                .search_waypoints(&system, &[WaypointFilter::Exchanges(good.clone())])
+                .await;
+        }
+        match buyers.first() {
+            Some(dest) => {
+                ship.goto_waypoint(&dest.symbol).await;
+                ship.refresh_market().await;
+                let mut remaining = ship.cargo_good_count(&good);
+                while remaining > 0 {
+                    let market = ship.ctx.universe.get_market(&ship.waypoint()).unwrap();
+                    let Some(trade) = market.data.trade_goods.iter().find(|g| g.symbol == good)
+                    else {
+                        break;
+                    };
+                    let units = min(trade.trade_volume, remaining);
+                    ship.sell_goods(&good, units, true).await;
+                    ship.refresh_market().await;
+                    remaining -= units;
+                }
+                // Market couldn't absorb all of it: jettison the rest to free the hold.
+                let leftover = ship.cargo_good_count(&good);
+                if leftover > 0 {
+                    ship.jettison_cargo(&good, leftover).await;
+                }
+            }
+            None => {
+                warn!(
+                    "{}: no in-system market buys {}; jettisoning {}",
+                    ship.symbol(),
+                    good,
+                    item.units
+                );
+                ship.jettison_cargo(&good, item.units).await;
+            }
+        }
+    }
+}
+
 async fn execute_logistics_action(ship: &ShipController, action: &Action, ac: &AgentController) {
     match action {
         Action::RefreshMarket => ship.refresh_market().await,
@@ -76,6 +156,22 @@ async fn execute_logistics_action(ship: &ShipController, action: &Action, ac: &A
             let mut remaining_to_buy = units - good_count;
             ship.refresh_market().await;
             while remaining_to_buy > 0 {
+                // Clamp to free space: the planner sizes `units` against an empty hold,
+                // but the ship may carry other cargo (fuel, or stray goods from a
+                // crash-interrupted trade). Buying past capacity 400s and — via the
+                // panic-on-non-2xx api client — crashes the whole agent. If the hold is
+                // full, stop rather than loop forever.
+                let space = ship.cargo_space_available();
+                if space == 0 {
+                    warn!(
+                        "{}: hold full ({} units of other cargo), can't buy remaining {} {}",
+                        ship.symbol(),
+                        ship.cargo_units(),
+                        remaining_to_buy,
+                        good
+                    );
+                    break;
+                }
                 let market = ship.ctx.universe.get_market(&ship.waypoint()).unwrap();
                 let trade = market
                     .data
@@ -83,7 +179,7 @@ async fn execute_logistics_action(ship: &ShipController, action: &Action, ac: &A
                     .iter()
                     .find(|g| g.symbol == *good)
                     .unwrap();
-                let buy_units = min(trade.trade_volume, remaining_to_buy);
+                let buy_units = min(min(trade.trade_volume, remaining_to_buy), space);
                 ship.buy_goods(good, buy_units, true).await;
                 ship.refresh_market().await;
                 remaining_to_buy -= buy_units;
