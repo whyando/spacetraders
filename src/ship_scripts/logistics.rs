@@ -219,16 +219,22 @@ async fn execute_logistics_action(ship: &ShipController, action: &Action, ac: &A
             ship.supply_construction(good, *units).await;
         }
         Action::DeliverContract(good, units) => {
-            if ship.cargo_good_count(good) == 0 {
+            // Deliver what we actually hold, not the planned amount: a buy clamped by free
+            // space (stray cargo occupying the hold) leaves fewer units than the task
+            // planned, and delivering more than present 400s -> crashes the agent. The
+            // contract manager re-tasks any shortfall; reconcile_stray_cargo frees the
+            // hold at the next task boundary so future buys reach the full amount.
+            let have = ship.cargo_good_count(good);
+            if have == 0 {
                 warn!(
                     "Ship {} has no cargo of {}. Assuming action is complete.",
                     ship.ship_symbol, good
                 );
                 return;
             }
-
+            let units = min(*units, have);
             let contract_id = ac.get_current_contract_id().unwrap();
-            ship.deliver_contract(&contract_id, good, *units).await;
+            ship.deliver_contract(&contract_id, good, units).await;
             ac.spawn_contract_task();
         }
         _ => {

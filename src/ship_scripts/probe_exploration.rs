@@ -39,6 +39,18 @@ async fn tick(
 ) -> Option<ExplorerState> {
     match state {
         Init => {
+            // Pause exploration while the treasury is thin: charting jumps cost fuel, and
+            // when credits are low we'd rather let the traders rebuild capital than keep
+            // spending on exploration. Gated here at Init, a probe finishes its current
+            // target (it only pauses before taking a new one — no mid-flight abort) and
+            // idles until credits recover past the threshold.
+            const MIN_CREDITS_FOR_EXPLORATION: i64 = 1_000_000;
+            if ac.ctx.ledger.available_credits() < MIN_CREDITS_FOR_EXPLORATION {
+                ship.set_state_description("Exploration paused: credits < 1M");
+                tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                return None; // stay in Init; re-check next tick
+            }
+
             // The graph already excludes under-construction gates (their construction
             // status is known up front), so any reserved target is safe to jump to.
             let target = ac
