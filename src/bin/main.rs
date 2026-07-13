@@ -54,6 +54,10 @@ async fn main() {
     // Kick off the one-time background load of every system (no-op if already done
     // this reset). Full-galaxy consumers await it via Universe::await_systems_loaded.
     universe.spawn_galaxy_load();
+    // Warm construction status for under-construction gates off-lock, so the jumpgate
+    // graph build never fetches on the try_buy_ships critical path (no-op if already
+    // done this reset). Decoupled from spawn_galaxy_load's systems_ready barrier.
+    universe.spawn_construction_load();
 
     // Startup Phase: register if not already registered, and load agent token
     let agent_token = match db.get_agent_token(&callsign).await {

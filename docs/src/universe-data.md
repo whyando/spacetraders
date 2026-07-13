@@ -32,6 +32,13 @@ while it loads:
   so it runs once and later restarts load from the DB.
 - `systems_ready` (a `watch`) flips true when done; full-galaxy consumers
   (`jumpgate_graph`, `warp_jump_graph`) call `await_systems_loaded()` first.
+- `spawn_construction_load` (also from `bin/main.rs`): a separate one-time task,
+  `gate_construction_loaded`-marker-guarded, that fetches + persists the construction
+  site for every gate flagged under-construction, then invalidates `jumpgate_graph`. It
+  is deliberately **not** gated on `systems_ready` — the graph build awaits that barrier
+  under the `try_buy_ships` lock, so folding this multi-minute sweep into it would
+  re-create the lock-timeout crash. The build itself reads construction status cache/DB
+  only (`construction_cached`), never the API.
 
 ## Waypoint details & the staleness gotcha
 
@@ -96,7 +103,7 @@ state, …), `systems`, `waypoints`, `waypoint_details`, `jumpgate_connections`,
 
 | concern | location |
 |---|---|
-| caches + bootstrap | `src/universe/mod.rs` — `Universe`, `spawn_galaxy_load`, `load_all_systems`, `load_gate_waypoints`, `await_systems_loaded` |
+| caches + bootstrap | `src/universe/mod.rs` — `Universe`, `spawn_galaxy_load`, `spawn_construction_load`, `load_all_systems`, `load_gate_waypoints`, `await_systems_loaded`, `construction_cached` |
 | waypoint details | `src/universe/mod.rs` — `get_system_waypoints`, `refresh_system_waypoints`, `discover_system_markets`, `ingest_scanned_waypoints`, `note_waypoint_traits`, `is_uncharted` |
 | market/shipyard getters | `src/universe/mod.rs` — `get_market_remote`, `get_shipyard_remote`, `get_market` |
 | market refresh | `src/ship_controller.rs` — `refresh_market`, `refresh_shipyard` |

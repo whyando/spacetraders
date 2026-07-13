@@ -154,6 +154,58 @@ impl Universe {
         });
     }
 
+    // One-time, off-lock warm of construction sites for every gate flagged
+    // under-construction, so the jumpgate graph build (which reads cache/DB only, never
+    // the API — see construction_cached) has real status without a per-build API sweep.
+    // Deliberately NOT gated on `systems_ready`: the lock-holding graph build awaits
+    // that barrier, so folding this multi-minute sweep into it would just relocate the
+    // try_buy_ships lock-timeout crash it exists to prevent. Marker-guarded so it runs
+    // once per DB (and once on upgrade for agents past the gate-waypoint phase).
+    pub fn spawn_construction_load(self: &Arc<Self>) {
+        let this = self.clone();
+        tokio::spawn(async move {
+            if this
+                .db
+                .get_value::<bool>("gate_construction_loaded")
+                .await
+                .unwrap_or(false)
+            {
+                return;
+            }
+            // Needs gate waypoint details (is_under_construction flags) loaded.
+            this.await_systems_loaded().await;
+            let gate_systems = this.systems();
+            let under_construction: Vec<WaypointSymbol> = gate_systems
+                .iter()
+                .flat_map(|s| s.waypoints.iter())
+                .filter(|w| w.waypoint_type == "JUMP_GATE")
+                .filter(|w| {
+                    w.details
+                        .as_ref()
+                        .map(|d| d.is_under_construction)
+                        .unwrap_or(false)
+                })
+                .map(|w| w.symbol.clone())
+                .collect();
+            info!(
+                "Warming construction status for {} under-construction gates...",
+                under_construction.len()
+            );
+            for (i, gate) in under_construction.iter().enumerate() {
+                // fetch + persist off any lock; serial, so it respects the rate limit.
+                this.get_construction(gate).await;
+                if (i + 1) % 250 == 0 {
+                    info!("  ...{}/{} gates", i + 1, under_construction.len());
+                }
+            }
+            // Rebuild the memoized graph with the now-warm construction data so gates
+            // conservatively excluded during the warm window are re-evaluated.
+            this.jumpgate_graph.invalidate(&()).await;
+            this.db.set_value("gate_construction_loaded", &true).await;
+            info!("Construction status warm complete");
+        });
+    }
+
     // Fetch the full paginated systems list and bulk-insert systems + waypoints,
     // then repopulate the in-memory cache from the DB.
     async fn load_all_systems(&self) {
@@ -333,6 +385,25 @@ impl Universe {
                 construction
             }
         }
+    }
+
+    // Construction status from cache/DB only — never the API. Used on latency-sensitive
+    // paths (the jumpgate graph build) that must not block on a network fetch: a
+    // galaxy-wide per-gate API sweep there would hold the try_buy_ships lock past its
+    // 30s fail-fast timeout. Returns None when the site is not yet cached/persisted;
+    // the background construction load (spawn_construction_load) warms it off-lock.
+    pub async fn construction_cached(
+        &self,
+        symbol: &WaypointSymbol,
+    ) -> Option<Arc<WithTimestamp<Option<Construction>>>> {
+        if let Some(construction) = self.constructions.get(symbol) {
+            return Some(construction.clone());
+        }
+        let site = self.db.get_construction(symbol).await?;
+        let construction = Arc::new(site);
+        self.constructions
+            .insert(symbol.clone(), construction.clone());
+        Some(construction)
     }
 
     pub async fn update_construction(&self, construction: &Construction) {

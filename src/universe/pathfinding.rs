@@ -52,7 +52,10 @@ impl Universe {
     async fn build_jumpgate_graph(&self) -> BTreeMap<WaypointSymbol, JumpGate> {
         // One gate per system, keyed to its system for distance math. Gate systems'
         // waypoint details (incl. is_under_construction) are pre-fetched during the
-        // galaxy load, so construction status is known here without per-build fetches.
+        // galaxy load, and construction sites are pre-fetched by spawn_construction_load,
+        // so this build reads construction status from cache/DB only and never hits the
+        // API — a galaxy-wide per-gate fetch here would hold the try_buy_ships lock past
+        // its 30s fail-fast timeout (see construction_cached).
         let mut gate_systems: BTreeMap<WaypointSymbol, System> = BTreeMap::new();
         for system in self.systems() {
             let mut gates = system
@@ -73,7 +76,8 @@ impl Universe {
         // Construction status per gate. A waypoint flagged *constructed* is always
         // trustworthy (a gate never reads constructed while still building, and never
         // reverts). A waypoint flagged *under construction* can be stale after the gate
-        // completes, so confirm those few against the construction site.
+        // completes, so confirm it against the construction site — but cache/DB only,
+        // never the API (spawn_construction_load warms that cache off-lock).
         let mut constructed: BTreeMap<WaypointSymbol, bool> = BTreeMap::new();
         for (gate, system) in &gate_systems {
             let flag = system
@@ -83,10 +87,13 @@ impl Universe {
                 .and_then(|w| w.details.as_ref())
                 .map(|d| d.is_under_construction);
             let is_constructed = match flag {
-                Some(true) => {
-                    let c = self.get_construction(gate).await;
-                    c.data.as_ref().map(|c| c.is_complete).unwrap_or(true)
-                }
+                Some(true) => match self.construction_cached(gate).await {
+                    Some(c) => c.data.as_ref().map(|c| c.is_complete).unwrap_or(true),
+                    // Flagged under-construction and not yet confirmed: exclude
+                    // conservatively (never route a jump into a possibly-unbuilt gate).
+                    // Warmed by spawn_construction_load; self-corrects on the next rebuild.
+                    None => false,
+                },
                 // constructed, or details not loaded yet -> presume constructed
                 Some(false) | None => true,
             };

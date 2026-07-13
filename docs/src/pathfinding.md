@@ -55,9 +55,16 @@ traversable jump connections:
 - **Nodes**: one gate per system (from the in-memory system list — no galaxy-wide
   per-waypoint fetch).
 - **Construction status**: a gate counts as constructed via its *construction site*
-  (`get_construction` → `is_complete`), not the `is_under_construction` waypoint flag
-  (which goes stale after completion). Under-construction gates are excluded as both
-  source and destination — you can't jump to or from them.
+  (`is_complete`), not the `is_under_construction` waypoint flag (which goes stale after
+  completion). The build reads construction status **cache/DB only** via
+  `construction_cached` — **never the API**: a galaxy-wide per-gate fetch here would run
+  under the `try_buy_ships` lock and blow its 30s fail-fast timeout (this crash-looped
+  the agent on the first `InterSystem1` build, where most gates are still building). A
+  gate flagged under-construction with no cached site yet is excluded conservatively
+  until the warm-up confirms it. The cache is warmed off-lock by `spawn_construction_load`
+  (one-time, `gate_construction_loaded` marker), which fetches each under-construction
+  gate's site and then invalidates the graph. Under-construction gates are excluded as
+  both source and destination — you can't jump to or from them.
 - **Edges**: only **charted** gates (`self.jumpgates`) contribute connections; each
   edge has `cooldown = 60 + distance`. A reverse edge is added only when the
   destination isn't itself charted (a charted gate emits its own edges), which avoids
